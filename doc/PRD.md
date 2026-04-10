@@ -26,8 +26,9 @@
 
 ### 3.1. Mục tiêu sản phẩm
 
-- Số hóa 30+ thí nghiệm trọng tâm THCS
-- Giúp mỗi học sinh thực hiện ít nhất 15 thí nghiệm/năm
+- Số hóa **1-3 thí nghiệm tiêu biểu** (VD: 1 Vật lý, 1 Hóa học) để demo giá trị sản phẩm.
+- Triển khai hệ thống multi-agent với **2 agents** chủ chốt (Scripting & Evaluator).
+- Cung cấp giao diện mô phỏng (Visualization) sinh động, tương tác thời gian thực.
 
 ### 3.2. Mục tiêu giáo dục
 
@@ -98,15 +99,10 @@ Sau khi giáo viên duyệt, học sinh có thể thực hiện thí nghiệm tr
 
 Hệ thống ghi nhận quá trình tương tác của học sinh, từ đó tổng hợp lỗi phổ biến, mức độ hoàn thành và tạo feedback hỗ trợ giáo viên.
 
-### 6.5. Vai trò của Multi-agent
+Multi-agent được chia thành 2 vai trò chuyên biệt để tối ưu vận hành cho MVP:
 
-Multi-agent được sử dụng để chia hệ thống thành các bước chuyên biệt như:
-
-- phân tích yêu cầu của giáo viên,
-- tạo kịch bản thí nghiệm,
-- kiểm tra tính đúng đắn,
-- phân tích hành vi học sinh,
-- tổng hợp phản hồi cho giáo viên.
+- **Scripting Agent (Agent tạo kịch bản):** Phân tích yêu cầu từ giáo viên để sinh ra kịch bản thí nghiệm ảo hoàn chỉnh.
+- **Evaluator Agent (Agent đánh giá):** Theo dõi quá trình tương tác của học sinh, phân tích hành vi và đánh giá kết quả thực hành.
 
 ## 7. Metrics
 
@@ -117,7 +113,7 @@ Multi-agent được sử dụng để chia hệ thống thành các bước chu
 
 ### 7.2. Usage Metrics
 
-- ≥15 thí nghiệm/học sinh/năm
+- Hoàn thành đầy đủ các thí nghiệm trong danh sách MVP.
 - Thời gian tương tác trung bình mỗi session > 10 phút
 
 ### 7.3. System Metrics
