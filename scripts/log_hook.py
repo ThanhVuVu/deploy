@@ -128,7 +128,13 @@ def normalize(data: dict, tool: str) -> dict | None:
 
 
 def main():
-    raw = sys.stdin.read().strip()
+    try:
+        # sys.stdin on Windows might be cp1252 but Copilot passes UTF-8.
+        # We should read the raw bytes.
+        raw_bytes = sys.stdin.buffer.read()
+        raw = raw_bytes.decode('utf-8', errors='replace').strip()
+    except Exception:
+        sys.exit(0)
     if not raw:
         sys.exit(0)
 
