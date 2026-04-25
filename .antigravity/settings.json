@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "BeforeAgent": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "name": "log-prompt",
+            "type": "command",
+            "command": "python scripts/log_hook.py antigravity",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "AfterModel": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "name": "log-model",
+            "type": "command",
+            "command": "python scripts/log_hook.py antigravity",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "name": "log-session-end",
+            "type": "command",
+            "command": "python scripts/log_hook.py antigravity",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}

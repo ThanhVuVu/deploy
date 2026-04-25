@@ -15,8 +15,15 @@ build/
 # OS
 .DS_Store
 
+
 # AI logs — tracked structure, ignored content
-.ai-log/*.jsonl
+.ai-log/*
+!.ai-log/.gitkeep
+
+# RAG Data
+.rag/
+**/image_caption_cache.json
+**/pdf_manifest.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

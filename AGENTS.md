@@ -14,6 +14,7 @@ Supported tools and their hook configs:
 | Cursor | `.cursor/hooks.json` |
 | OpenAI Codex | `.codex/hooks.json` |
 | Gemini CLI | `.gemini/settings.json` |
+| Antigravity | `.antigravity/settings.json` |
 | GitHub Copilot | `.github/hooks/hooks.json` |
 
 Logs are saved to `.ai-log/session.jsonl` and submitted automatically on `git push`.

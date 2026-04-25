@@ -22,6 +22,8 @@ def git(cmd):
 
 def detect_tool(data: dict) -> str:
     """Detect which AI tool sent this hook event."""
+    if len(sys.argv) > 1:
+        return sys.argv[1].lower()
     tool_env = os.environ.get("AI_TOOL_NAME", "").lower()
     if tool_env:
         return tool_env
@@ -77,7 +79,7 @@ def normalize(data: dict, tool: str) -> dict | None:
             "tool_response": str(data.get("tool_response", ""))[:500],
         })
 
-    elif tool == "gemini":
+    elif tool in ("gemini", "antigravity"):
         if event == "BeforeAgent":
             prompt = data.get("prompt", "")[:1000]
             base.update({"prompt": prompt})
@@ -129,10 +131,28 @@ def normalize(data: dict, tool: str) -> dict | None:
 
 def main():
     try:
-        # sys.stdin on Windows might be cp1252 but Copilot passes UTF-8.
-        # We should read the raw bytes.
+        # sys.stdin on Windows might be cp1252 but tools may pass UTF-8.
+        # Read raw bytes and try multiple encodings.
         raw_bytes = sys.stdin.buffer.read()
-        raw = raw_bytes.decode('utf-8', errors='replace').strip()
+
+        # Try decodings in order: utf-8 → cp1252 → latin-1 (never fails)
+        raw = None
+        for enc in ("utf-8", "cp1252", "latin-1"):
+            try:
+                raw = raw_bytes.decode(enc)
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        if raw is None:
+            raw = raw_bytes.decode("utf-8", errors="replace")
+        raw = raw.strip()
+
+        # Debug logging
+        log_dir = Path(os.environ.get("AI_LOG_DIR", ".ai-log"))
+        log_dir.mkdir(exist_ok=True)
+        with open(log_dir / "debug.json", "a", encoding="utf-8") as f:
+            f.write(raw + "\n")
+
     except Exception:
         sys.exit(0)
     if not raw:

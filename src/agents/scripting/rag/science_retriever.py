@@ -26,6 +26,10 @@ try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 except ImportError:  # pragma: no cover - environment-specific dependency
     RecursiveCharacterTextSplitter = None
+try:
+    from pypdf import PdfReader
+except ImportError:  # pragma: no cover - environment-specific dependency
+    PdfReader = None
 
 logger = logging.getLogger(__name__)
 
@@ -175,13 +179,14 @@ class ScriptingScienceRetriever:
     """
     Build and query a local Chroma index for scripting-agent science facts.
 
-    The index is fed from markdown files in ``mock_science_db``.
+    The index is fed from ``science_db`` documents.
+    Markdown files are preferred; PDF ingestion is used as a fallback.
     """
 
     def __init__(
         self,
         *,
-        database_dir: str | Path = "mock_science_db",
+        database_dir: str | Path = "science_db",
         persist_dir: str | Path = ".rag/scripting_chroma",
         collection_name: str = "scripting_science_facts",
         chunk_size: int = 700,
@@ -233,11 +238,11 @@ class ScriptingScienceRetriever:
         self.build_or_update_index()
 
     def build_or_update_index(self) -> int:
-        """Load markdown facts, chunk them, and upsert missing chunks."""
-        chunk_records = self._chunk_records_from_markdown()
+        """Load science facts, chunk them, and upsert missing chunks."""
+        chunk_records = self._chunk_records_from_sources()
         if not chunk_records:
             logger.warning(
-                "ScriptingScienceRetriever: no markdown documents found at %s",
+                "ScriptingScienceRetriever: no supported science documents found at %s",
                 self.database_dir,
             )
             return 0
@@ -326,44 +331,143 @@ class ScriptingScienceRetriever:
 
         return existing_ids
 
+    def _chunk_records_from_sources(self) -> list[dict[str, Any]]:
+        """Collect chunk records from preferred markdown files, then PDF fallback."""
+        markdown_records = self._chunk_records_from_markdown()
+        if markdown_records:
+            return markdown_records
+
+        return self._chunk_records_from_pdf()
+
     def _chunk_records_from_markdown(self) -> list[dict[str, Any]]:
         """Load markdown files and convert them into chunk records."""
         if not self.database_dir.exists():
             return []
 
         records: list[dict[str, Any]] = []
-        for file_path in sorted(self.database_dir.glob("*.md")):
+        markdown_files = sorted(self.database_dir.glob("*.md")) + sorted(
+            self.database_dir.glob("*.markdown")
+        )
+        for file_path in markdown_files:
             text = file_path.read_text(encoding="utf-8").strip()
             if not text:
                 continue
 
             topic = file_path.stem.lower()
             for section, section_text in self._iter_sections(text):
-                chunks = self.text_splitter.split_text(section_text)
-                for index, chunk in enumerate(chunks):
-                    content = chunk.strip()
-                    if not content:
-                        continue
-
-                    chunk_id = self._build_chunk_id(
+                records.extend(
+                    self._records_from_text(
                         source_file=file_path.name,
+                        topic=topic,
                         section=section,
-                        index=index,
-                        content=content,
+                        text=section_text,
                     )
+                )
 
-                    records.append(
-                        {
-                            "id": chunk_id,
-                            "content": content,
-                            "metadata": {
-                                "topic": topic,
-                                "source_file": file_path.name,
-                                "section": section,
-                                "chunk_id": chunk_id,
-                            },
-                        }
+        return records
+
+    def _chunk_records_from_pdf(self) -> list[dict[str, Any]]:
+        """Extract text from PDF files and convert extractable pages into chunks."""
+        if not self.database_dir.exists():
+            return []
+
+        pdf_files = sorted(self.database_dir.glob("*.pdf"))
+        if not pdf_files:
+            return []
+
+        if PdfReader is None:
+            logger.warning(
+                "ScriptingScienceRetriever: pypdf is not installed; skipping %s PDF file(s).",
+                len(pdf_files),
+            )
+            return []
+
+        records: list[dict[str, Any]] = []
+        for file_path in pdf_files:
+            try:
+                reader = PdfReader(str(file_path))
+            except Exception as exc:
+                logger.warning(
+                    "ScriptingScienceRetriever: failed to parse PDF %s: %s",
+                    file_path.name,
+                    exc,
+                )
+                continue
+
+            topic = file_path.stem.lower()
+            for page_index, page in enumerate(reader.pages, start=1):
+                try:
+                    page_text = (page.extract_text() or "").strip()
+                except Exception as exc:
+                    logger.warning(
+                        "ScriptingScienceRetriever: failed to extract text from %s page %s: %s",
+                        file_path.name,
+                        page_index,
+                        exc,
                     )
+                    continue
+
+                if not page_text:
+                    continue
+
+                normalized_text = "\n".join(
+                    line.strip() for line in page_text.splitlines() if line.strip()
+                )
+                if not normalized_text:
+                    continue
+
+                records.extend(
+                    self._records_from_text(
+                        source_file=file_path.name,
+                        topic=topic,
+                        section=f"page-{page_index}",
+                        text=normalized_text,
+                    )
+                )
+
+        if not records:
+            logger.warning(
+                "ScriptingScienceRetriever: PDF files found but no extractable text in %s",
+                self.database_dir,
+            )
+
+        return records
+
+    def _records_from_text(
+        self,
+        *,
+        source_file: str,
+        topic: str,
+        section: str,
+        text: str,
+    ) -> list[dict[str, Any]]:
+        """Split text into chunks and return Chroma-ready records."""
+        records: list[dict[str, Any]] = []
+        chunks = self.text_splitter.split_text(text)
+        for index, chunk in enumerate(chunks):
+            content = chunk.strip()
+            if not content:
+                continue
+
+            chunk_id = self._build_chunk_id(
+                source_file=source_file,
+                section=section,
+                index=index,
+                content=content,
+            )
+
+            records.append(
+                {
+                    "id": chunk_id,
+                    "content": content,
+                    "metadata": {
+                        "topic": topic,
+                        "source_file": source_file,
+                        "section": section,
+                        "chunk_id": chunk_id,
+                    },
+                }
+            )
 
         return records
 
