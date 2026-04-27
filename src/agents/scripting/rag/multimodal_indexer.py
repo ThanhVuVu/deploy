@@ -129,6 +129,7 @@ class MultimodalIndexer:
         # TextEmbedder — single embedder for ALL modalities (lazy)
         self._text_embedder = None
         self._embedding_model = embedding_model
+        self._openai_client = None
 
         # ── ChromaDB client + 3 collections ──────────────────────────────
         # All three collections use the same embedding space (1536-dim OpenAI)
@@ -380,7 +381,11 @@ class MultimodalIndexer:
                 "CHỈ trả về JSON, không thêm bất kỳ text nào khác."
             )
 
-            client = OpenAI()
+            if self._openai_client is None:
+                from openai import OpenAI
+                self._openai_client = OpenAI()
+
+            client = self._openai_client
             response = client.chat.completions.create(
                 model=self.openai_model,
                 messages=[{
@@ -451,7 +456,11 @@ class MultimodalIndexer:
         try:
             from openai import OpenAI
 
-            client = OpenAI()
+            if self._openai_client is None:
+                from openai import OpenAI
+                self._openai_client = OpenAI()
+
+            client = self._openai_client
             response = client.chat.completions.create(
                 model=self.openai_model,
                 messages=[
@@ -568,7 +577,28 @@ class MultimodalIndexer:
     @staticmethod
     def _save_json(path: Path, data: dict) -> None:
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except OSError as exc:
+            from filelock import FileLock
+            lock_path = path.with_suffix(path.suffix + ".lock")
+            with FileLock(str(lock_path), timeout=10):
+                # Prevent race condition by merging with existing data
+                if path.exists():
+                    try:
+                        with open(path, "r", encoding="utf-8") as f:
+                            existing_data = json.load(f)
+                            if isinstance(existing_data, dict):
+                                existing_data.update(data)
+                                data = existing_data
+                    except (json.JSONDecodeError, OSError):
+                        pass
+
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+        except ImportError:
+            # Fallback if filelock is not installed
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            except OSError as exc:
+                logger.error("MultimodalIndexer: could not save %s — %s", path, exc)
+        except Exception as exc:
             logger.error("MultimodalIndexer: could not save %s — %s", path, exc)
