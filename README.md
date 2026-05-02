@@ -79,3 +79,51 @@ See each file for the format and examples.
 Prompts and tool calls are **automatically logged** when you use any supported AI tool (Claude Code, Cursor, Codex, Gemini, Copilot). No manual steps needed after running `setup_hooks.sh`.
 
 See [AGENTS.md](./AGENTS.md) for details.
+
+## Virtual Lab Pipeline
+
+The MVP pipeline is now:
+
+1. Teacher prompt
+2. RAG retrieval from `science_db/`
+3. `ScriptingAgent` creates the grounded experiment script
+4. `SimulatorAgent` converts the script plus the same RAG context into runnable p5.js files
+
+Ingest/update the multimodal RAG index first:
+
+```bash
+python -m src.agents.scripting.ingest_cli --all
+```
+
+Recommended per-agent model config in `.env`:
+
+```bash
+SCRIPTING_PROVIDER_BACKEND=openai
+SCRIPTING_LLM_MODEL=gpt-4o
+SIMULATOR_PROVIDER_BACKEND=openai
+SIMULATOR_LLM_MODEL=gpt-5.5
+```
+
+Generate a complete simulation:
+
+```bash
+python -m src.pipeline.generate_experiment_cli "So sánh nhiệt độ sôi và trạng thái phân tử của oxygen, ethanol, nước, thủy ngân và sắt" --out-dir generated/phase_change --simulator-model gpt-5.5
+```
+
+Run the local Streamlit UI:
+
+```bash
+streamlit run demo_virtual_lab.py
+```
+
+The UI lets a teacher enter one prompt, then automatically runs RAG, scripting,
+simulator generation, writes `index.html` and `sketch.js`, creates a standalone
+`experiment_standalone.html`, and previews the experiment in the browser.
+
+Run only the simulator stage from an existing script:
+
+```bash
+python -m src.agents.simulator.cli --script script.md --out-dir generated/from_script --model gpt-5.5
+```
+
+The simulator output contract requires `index.html` and `sketch.js`; the parser validates that the generated sketch defines `setup()`, `draw()`, creates a canvas, and that HTML loads p5.js plus `sketch.js`.

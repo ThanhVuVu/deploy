@@ -127,7 +127,7 @@ class _FakeChromaModule:
 
 
 @pytest.fixture()
-def golden_retriever(monkeypatch, tmp_path) -> ScriptingScienceRetriever:
+def golden_retriever(monkeypatch) -> ScriptingScienceRetriever:
     """Build retriever from mock markdown database with fully local fakes."""
     monkeypatch.setattr(retriever_module, "chromadb", _FakeChromaModule())
     if retriever_module.RecursiveCharacterTextSplitter is None:
@@ -138,7 +138,7 @@ def golden_retriever(monkeypatch, tmp_path) -> ScriptingScienceRetriever:
 
     return ScriptingScienceRetriever(
         database_dir=database_dir,
-        persist_dir=tmp_path / "rag_index",
+        persist_dir=project_root,
         embedding_client=_KeywordEmbeddings(),
         default_top_k=4,
     )

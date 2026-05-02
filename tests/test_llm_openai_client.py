@@ -167,6 +167,37 @@ class TestOpenAIClientChat:
         assert kw["model"] == "gpt-4-turbo"
 
     @patch("src.llm.openai_client.OpenAI")
+    def test_chat_converts_max_tokens_for_gpt5_models(self, MockOpenAI):
+        mock_client = MockOpenAI.return_value
+        mock_client.chat.completions.create.return_value = _make_completion()
+
+        client = OpenAIClient(_make_provider(model="gpt-5.5", max_tokens=320))
+        client.chat([{"role": "user", "content": "hi"}])
+
+        kw = mock_client.chat.completions.create.call_args.kwargs
+        assert kw["model"] == "gpt-5.5"
+        assert kw["max_completion_tokens"] == 320
+        assert "temperature" not in kw
+        assert "max_tokens" not in kw
+
+    @patch("src.llm.openai_client.OpenAI")
+    def test_chat_removes_sampling_params_for_gpt5_models(self, MockOpenAI):
+        mock_client = MockOpenAI.return_value
+        mock_client.chat.completions.create.return_value = _make_completion()
+
+        client = OpenAIClient(_make_provider(model="openai/gpt-5.5", max_tokens=320))
+        client.chat(
+            [{"role": "user", "content": "hi"}],
+            temperature=0.1,
+            top_p=0.8,
+        )
+
+        kw = mock_client.chat.completions.create.call_args.kwargs
+        assert kw["model"] == "openai/gpt-5.5"
+        assert "temperature" not in kw
+        assert "top_p" not in kw
+
+    @patch("src.llm.openai_client.OpenAI")
     def test_chat_simple_returns_string(self, MockOpenAI):
         mock_client = MockOpenAI.return_value
         mock_client.chat.completions.create.return_value = _make_completion("42")
@@ -273,6 +304,66 @@ class TestOpenAIClientRetry:
 
         # Should NOT retry on 401
         assert mock_client.chat.completions.create.call_count == 1
+
+    @patch("src.llm.openai_client.OpenAI")
+    def test_retries_after_converting_max_tokens_on_400(self, MockOpenAI):
+        completion = _make_completion("converted and ok")
+        mock_client = MockOpenAI.return_value
+
+        fake_response = MagicMock()
+        fake_response.headers = {}
+        fake_response.request = MagicMock()
+
+        bad_request = APIStatusError(
+            "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.",
+            response=fake_response,
+            body=None,
+        )
+        bad_request.status_code = 400
+
+        mock_client.chat.completions.create.side_effect = [bad_request, completion]
+
+        client = OpenAIClient(_make_provider(model="gpt-4o", max_tokens=512), max_retries=2)
+        resp = client.chat([{"role": "user", "content": "hi"}])
+
+        assert resp.content == "converted and ok"
+        assert mock_client.chat.completions.create.call_count == 2
+
+        first_call_kw = mock_client.chat.completions.create.call_args_list[0].kwargs
+        second_call_kw = mock_client.chat.completions.create.call_args_list[1].kwargs
+        assert first_call_kw["max_tokens"] == 512
+        assert "max_completion_tokens" not in first_call_kw
+        assert second_call_kw["max_completion_tokens"] == 512
+        assert "max_tokens" not in second_call_kw
+
+    @patch("src.llm.openai_client.OpenAI")
+    def test_retries_after_removing_unsupported_temperature_value(self, MockOpenAI):
+        completion = _make_completion("temperature removed")
+        mock_client = MockOpenAI.return_value
+
+        fake_response = MagicMock()
+        fake_response.headers = {}
+        fake_response.request = MagicMock()
+
+        bad_request = APIStatusError(
+            "Unsupported value: 'temperature' does not support 0.1 with this model. Only the default (1) value is supported.",
+            response=fake_response,
+            body={"error": {"param": "temperature"}},
+        )
+        bad_request.status_code = 400
+
+        mock_client.chat.completions.create.side_effect = [bad_request, completion]
+
+        client = OpenAIClient(_make_provider(model="gpt-4o", temperature=0.1), max_retries=2)
+        resp = client.chat([{"role": "user", "content": "hi"}])
+
+        assert resp.content == "temperature removed"
+        assert mock_client.chat.completions.create.call_count == 2
+
+        first_call_kw = mock_client.chat.completions.create.call_args_list[0].kwargs
+        second_call_kw = mock_client.chat.completions.create.call_args_list[1].kwargs
+        assert first_call_kw["temperature"] == 0.1
+        assert "temperature" not in second_call_kw
 
     @patch("src.llm.openai_client.time.sleep", return_value=None)
     @patch("src.llm.openai_client.OpenAI")

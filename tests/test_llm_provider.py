@@ -208,6 +208,35 @@ class TestChatKwargs:
         assert kw["temperature"] == 0.5
         assert kw["max_tokens"] == 512
 
+    def test_gpt5_uses_max_completion_tokens(self):
+        p = LLMProvider(
+            backend=ProviderBackend.OPENAI,
+            model="gpt-5.5",
+            api_key="k",
+            base_url="http://x/",
+            max_tokens=12000,
+        )
+        kw = p.chat_kwargs()
+        assert kw["model"] == "gpt-5.5"
+        assert kw["max_completion_tokens"] == 12000
+        assert "temperature" not in kw
+        assert "max_tokens" not in kw
+
+    def test_prefixed_gpt5_uses_max_completion_tokens(self):
+        p = LLMProvider(
+            backend=ProviderBackend.OPENAI,
+            model="openai/gpt-5.5",
+            api_key="k",
+            base_url="http://x/",
+            max_tokens=12000,
+            extra_kwargs={"top_p": 0.9},
+        )
+        kw = p.chat_kwargs()
+        assert kw["max_completion_tokens"] == 12000
+        assert "top_p" not in kw
+        assert "temperature" not in kw
+        assert "max_tokens" not in kw
+
     def test_thinking_flag_injected_for_nvidia(self):
         p = LLMProvider(
             backend=ProviderBackend.NVIDIA,

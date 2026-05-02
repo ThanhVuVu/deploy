@@ -386,29 +386,70 @@ class MultimodalIndexer:
                 self._openai_client = OpenAI()
 
             client = self._openai_client
-            response = client.chat.completions.create(
-                model=self.openai_model,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": f"Trang {page_number} — {pdf_name}:\n{prompt}"},
-                        {"type": "image_url", "image_url": {
-                            "url": f"data:{mime};base64,{b64}",
-                            "detail": "high",
-                        }},
-                    ],
-                }],
-                response_format={"type": "json_object"},
-                max_tokens=3000,
-                temperature=0.0,
-            )
-            return json.loads(response.choices[0].message.content)
+            
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = client.chat.completions.create(
+                        model=self.openai_model,
+                        messages=[{
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": f"Trang {page_number} — {pdf_name}:\n{prompt}"},
+                                {"type": "image_url", "image_url": {
+                                    "url": f"data:{mime};base64,{b64}",
+                                    "detail": "high",
+                                }},
+                            ],
+                        }],
+                        response_format={"type": "json_object"},
+                        max_tokens=3000,
+                        temperature=0.0 if attempt == 0 else 0.2, # slight variation on retry
+                    )
+                    
+                    content = response.choices[0].message.content
+                    if content is None:
+                        finish_reason = response.choices[0].finish_reason
+                        refusal = getattr(response.choices[0].message, "refusal", None)
+                        if refusal:
+                            logger.warning(
+                                "MultimodalIndexer: Vision analysis refused (p%s %s). Refusal: %s",
+                                page_number, pdf_name, refusal
+                            )
+                            # Do not skip: return a valid JSON with the refusal message
+                            return {
+                                "texts": [{"content": f"[CẢNH BÁO: OpenAI từ chối bóc tách hình ảnh này. Lý do: {refusal}]"}],
+                                "tables": [],
+                                "images": []
+                            }
+                            
+                        logger.warning(
+                            "MultimodalIndexer: Vision response content is None (p%s %s, attempt %d). Finish reason: %s",
+                            page_number, pdf_name, attempt + 1, finish_reason
+                        )
+                        import time
+                        time.sleep(2)
+                        continue # retry
+                        
+                    return json.loads(content)
+                except Exception as exc:
+                    logger.warning(
+                        "MultimodalIndexer: Vision analysis attempt %d failed (p%s %s) — %s",
+                        attempt + 1, page_number, pdf_name, exc
+                    )
+                    if attempt == max_retries - 1:
+                        logger.error("MultimodalIndexer: Vision analysis completely failed after %d retries.", max_retries)
+                        raise # Do not skip, bubble up the error
+                    import time
+                    time.sleep(2)
+                    
+            raise RuntimeError(f"Vision analysis failed for p{page_number} after {max_retries} retries due to None content.")
         except Exception as exc:
             logger.error(
-                "MultimodalIndexer: Vision analysis failed (p%s %s) — %s",
+                "MultimodalIndexer: Fatal error in vision analysis (p%s %s) — %s",
                 page_number, pdf_name, exc,
             )
-            return None
+            raise # Strict mode: do not skip any page
 
     # ── Table indexing ────────────────────────────────────────────────────────
 
@@ -493,8 +534,14 @@ class MultimodalIndexer:
         if not records:
             return 0
 
+        # ── 1. Deduplicate input records by ID ──────────────────────────
+        unique_map = {r["id"]: r for r in records}
+        unique_records = list(unique_map.values())
+
+        # ── 2. Filter out already existing IDs (optional but saves embedding cost) 
         existing_ids = self._get_existing_ids(collection)
-        new_records = [r for r in records if r["id"] not in existing_ids]
+        new_records = [r for r in unique_records if r["id"] not in existing_ids]
+        
         if not new_records:
             return 0
 
@@ -507,7 +554,8 @@ class MultimodalIndexer:
             logger.error("MultimodalIndexer: text embedding failed — %s", exc)
             return 0
 
-        collection.add(
+        # ── 3. Use upsert instead of add for maximum robustness ─────────
+        collection.upsert(
             ids=[r["id"] for r in new_records],
             documents=texts,
             metadatas=[r["metadata"] for r in new_records],

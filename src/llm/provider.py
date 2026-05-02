@@ -51,6 +51,14 @@ _DEFAULT_BASE_URLS: dict[ProviderBackend, str] = {
     ProviderBackend.OLLAMA: "http://localhost:11434/v1/",
 }
 
+_DEFAULT_ONLY_SAMPLING_PARAMS = (
+    "temperature",
+    "top_p",
+    "presence_penalty",
+    "frequency_penalty",
+    "logit_bias",
+)
+
 
 # ---------------------------------------------------------------------------
 # Configuration dataclass
@@ -79,14 +87,42 @@ class LLMProvider:
         _thinking_keywords = ("qwen3", "deepseek-r1", "nemotron", "o1", "o3")
         return any(kw in self.model.lower() for kw in _thinking_keywords)
 
+    @property
+    def uses_max_completion_tokens(self) -> bool:
+        """Return True when Chat Completions requires max_completion_tokens."""
+        model_name = self.model.lower()
+        openai_completion_token_models = ("gpt-5", "o1", "o3", "o4")
+        return self.backend == ProviderBackend.OPENAI and any(
+            marker in model_name for marker in openai_completion_token_models
+        )
+
+    @property
+    def uses_default_sampling_params(self) -> bool:
+        """Return True when the model rejects custom sampling controls."""
+        model_name = self.model.lower()
+        default_sampling_models = ("gpt-5", "o1", "o3", "o4")
+        return self.backend == ProviderBackend.OPENAI and any(
+            marker in model_name for marker in default_sampling_models
+        )
+
     def chat_kwargs(self) -> dict:
         """Build kwargs ready to unpack into ``client.chat.completions.create``."""
         kwargs: dict = {
             "model": self.model,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
             **self.extra_kwargs,
         }
+        if not self.uses_default_sampling_params:
+            kwargs.setdefault("temperature", self.temperature)
+        else:
+            for param in _DEFAULT_ONLY_SAMPLING_PARAMS:
+                kwargs.pop(param, None)
+
+        token_key = (
+            "max_completion_tokens"
+            if self.uses_max_completion_tokens
+            else "max_tokens"
+        )
+        kwargs.setdefault(token_key, self.max_tokens)
         # Some NVIDIA thinking models require this flag
         if self.is_thinking_model and self.backend == ProviderBackend.NVIDIA:
             kwargs.setdefault("chat_template_kwargs", {"thinking": {"type": "disabled"}})

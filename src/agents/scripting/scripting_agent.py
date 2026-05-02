@@ -5,10 +5,9 @@ Scripting agent responsible for writing comprehensive guides and step-by-step pr
 """
 
 import logging
+import os
 import sys
-import logging
 from typing import Any, Optional
-from pathlib import Path
 
 from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers import StrOutputParser
@@ -94,12 +93,23 @@ class ScriptingAgent(BaseAgent):
         self.mm_retriever = None
 
         try:
-            # Dùng gpt-4o-mini để ổn định hơn và tránh lỗi kết nối
+            # Resolve provider/model from per-agent env configuration.
+            resolved_model = llm_model or os.getenv("SCRIPTING_LLM_MODEL") or "gpt-4o"
+            provider = get_provider(
+                backend=os.getenv("SCRIPTING_PROVIDER_BACKEND"),
+                model=resolved_model,
+                temperature=float(os.getenv("SCRIPTING_TEMPERATURE", "0.2")),
+                max_tokens=int(os.getenv("SCRIPTING_MAX_TOKENS", "4096")),
+                timeout=float(os.getenv("SCRIPTING_TIMEOUT", "120")),
+            )
             llm = ChatOpenAI(
-                model="gpt-4o-mini",
-                temperature=0.2,
+                model=provider.model,
+                api_key=provider.api_key,
+                base_url=provider.base_url,
+                temperature=provider.temperature,
+                max_tokens=provider.max_tokens,
                 max_retries=3,
-                timeout=60,
+                timeout=provider.timeout,
             )
             prompt = ChatPromptTemplate.from_messages(
                 [
@@ -144,12 +154,16 @@ class ScriptingAgent(BaseAgent):
         context_notes = "\n".join(f"{k}: {v}" for k, v in context.items()) if context else "None"
         top_k = self._resolve_top_k(context)
 
+        use_multimodal = getattr(self, "use_multimodal", False)
+        mm_retriever = getattr(self, "mm_retriever", None)
+        retriever = getattr(self, "retriever", None)
+
         # ── Multimodal path ────────────────────────────────────────────────
-        if self.use_multimodal:
-            if not self.mm_retriever:
+        if use_multimodal:
+            if not mm_retriever:
                 return self._NO_DATA_MESSAGE
             try:
-                mm_result = self.mm_retriever.hybrid_retrieve(query, top_k=top_k)
+                mm_result = mm_retriever.hybrid_retrieve(query, top_k=top_k)
                 if not mm_result.has_enough_data:
                     return self._NO_DATA_MESSAGE
                 return self.chain.invoke(
@@ -165,11 +179,11 @@ class ScriptingAgent(BaseAgent):
                 return f"Guide generation failed: {exc}"
 
         # ── Legacy text-only path ──────────────────────────────────────────
-        if not self.retriever:
+        if not retriever:
             return self._NO_DATA_MESSAGE
 
         try:
-            retrieval = self.retriever.retrieve(query, top_k=top_k)
+            retrieval = retriever.retrieve(query, top_k=top_k)
             if not retrieval.has_enough_data:
                 return self._NO_DATA_MESSAGE
 
