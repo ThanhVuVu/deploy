@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -95,6 +97,26 @@ def test_pipeline_passes_rag_and_script_to_simulator():
     assert "water boils" in simulator.last_payload["retrieved_context"]
     assert result.output_dir.name == "generated_test"
     assert result.written_files == ()
+
+
+def test_pipeline_writes_single_named_html_file():
+    pipeline = ExperimentGenerationPipeline(
+        retriever=_FakeRetriever(_FakeRetrieval()),
+        scripting_agent=_FakeScriptingAgent(),
+        simulator_agent=_FakeSimulatorAgent(),
+    )
+    output_dir = Path(f"generated_test_pipeline_{uuid.uuid4().hex}")
+
+    result = pipeline.run(
+        "Teacher prompt",
+        output_dir=output_dir,
+        output_filename="teacher-prompt-120000-20260502.html",
+        write_files=True,
+    )
+
+    assert len(result.written_files) == 1
+    assert result.written_files[0].name == "teacher-prompt-120000-20260502.html"
+    assert result.written_files[0].read_text(encoding="utf-8").count("<script") >= 2
 
 
 def test_pipeline_rejects_empty_rag():

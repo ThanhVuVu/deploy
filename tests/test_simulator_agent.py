@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -40,6 +42,21 @@ def _valid_html() -> str:
 """
 
 
+def _valid_experiment_html() -> str:
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+</head>
+<body>
+  <script>
+{_valid_js()}
+  </script>
+</body>
+</html>
+"""
+
+
 class _FakeClient:
     def __init__(self, content: str) -> None:
         self.content = content
@@ -71,7 +88,25 @@ class TestSimulatorOutputParser:
         assert "water" in artifacts.dsl
         assert artifacts.index_html.strip() == _valid_html().strip()
         assert artifacts.sketch_js.strip() == _valid_js().strip()
+        assert "function draw" in artifacts.single_file_html
+        assert list(artifacts.files) == ["experiment.html"]
         assert artifacts.validation_checklist == ("uses p5",)
+
+    def test_parse_single_experiment_html_payload(self):
+        raw = json.dumps(
+            {
+                "structured_understanding": "facts",
+                "dsl": "dsl",
+                "architecture": "single html",
+                "files": {"experiment.html": _valid_experiment_html()},
+            }
+        )
+
+        artifacts = SimulatorOutputParser().parse(raw)
+
+        assert "function setup" in artifacts.experiment_html
+        assert "function draw" in artifacts.single_file_html
+        assert artifacts.files == {"experiment.html": artifacts.single_file_html}
 
     def test_parse_fenced_blocks(self):
         raw = f"""Structured understanding: demo
@@ -110,6 +145,19 @@ class TestSimulatorOutputParser:
 
         assert "p5" in artifacts.index_html.lower()
         assert "sketch.js" in artifacts.index_html
+        assert "function setup" in artifacts.single_file_html
+
+    def test_write_to_outputs_one_named_html_file(self):
+        artifacts = SimulatorOutputParser().parse(
+            json.dumps({"files": {"experiment.html": _valid_experiment_html()}})
+        )
+        output_dir = Path(f"generated_test_simulator_{uuid.uuid4().hex}")
+
+        written = artifacts.write_to(output_dir, filename="phase-change-120000-20260502.html")
+
+        assert len(written) == 1
+        assert written[0].name == "phase-change-120000-20260502.html"
+        assert "function draw" in written[0].read_text(encoding="utf-8")
 
 
 class TestSimulatorAgent:

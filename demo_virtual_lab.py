@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 import re
 import time
+import unicodedata
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -146,6 +147,61 @@ html, body, [class*="css"] {
   white-space: pre-wrap;
 }
 
+.library-panel {
+  background: rgba(17, 24, 39, .72);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem;
+  margin: .75rem 0 1rem;
+}
+
+.library-panel h2 {
+  color: var(--text);
+  font-size: 1.05rem;
+  margin: 0 0 .35rem;
+  font-weight: 800;
+}
+
+.library-panel p {
+  color: #b6c7df;
+  margin: 0;
+  font-size: .9rem;
+}
+
+.stMarkdown,
+.stMarkdown p,
+.stCaption,
+[data-testid="stCaptionContainer"],
+[data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p {
+  color: #d9e6f7 !important;
+}
+
+[data-testid="stWidgetLabel"] p {
+  font-weight: 700;
+}
+
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  color: #a9bbd3 !important;
+}
+
+.stButton > button {
+  background: #162033;
+  border: 1px solid #334155;
+  color: #e8f1ff;
+  font-weight: 700;
+  border-radius: 9px;
+  min-height: 2.55rem;
+}
+
+.stButton > button:hover {
+  background: #1e293b;
+  border-color: #38bdf8;
+  color: white;
+}
+
 .stButton > button[kind="primary"] {
   background: linear-gradient(135deg, #0284c7, #059669);
   border: 0;
@@ -158,9 +214,42 @@ html, body, [class*="css"] {
 .stTextArea textarea,
 .stTextInput input,
 .stSelectbox div[data-baseweb="select"] > div {
-  background: #0f172a !important;
+  background: #111a2d !important;
   border-color: #334155 !important;
   color: var(--text) !important;
+}
+
+.stTextArea textarea:focus,
+.stTextInput input:focus {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, .35) !important;
+}
+
+[data-baseweb="select"] span,
+[data-baseweb="select"] div {
+  color: #e5eefb !important;
+}
+
+[data-testid="stAlert"] {
+  border-radius: 10px;
+  border: 1px solid rgba(52, 211, 153, .28);
+}
+
+.stTabs [data-baseweb="tab-list"] {
+  gap: .35rem;
+}
+
+.stTabs [data-baseweb="tab"] {
+  background: #121c30;
+  border: 1px solid #263449;
+  border-radius: 8px 8px 0 0;
+  color: #cbdaf0;
+  font-weight: 700;
+}
+
+.stTabs [aria-selected="true"] {
+  background: #1c2a44 !important;
+  color: white !important;
 }
 </style>
 """,
@@ -169,51 +258,64 @@ html, body, [class*="css"] {
 
 
 def slugify(text: str, max_len: int = 42) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", text.lower()).strip("-")
+    normalized = unicodedata.normalize("NFKD", text)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", ascii_text.lower()).strip("-")
     return (slug or "virtual-lab")[:max_len].strip("-") or "virtual-lab"
 
 
 def build_standalone_html(artifacts: SimulatorArtifacts) -> str:
-    """Create one downloadable/previewable HTML file by inlining sketch.js."""
-    sketch = artifacts.sketch_js.strip()
-    index_html = artifacts.index_html.strip()
-
-    inline_script = f"<script>\n{sketch}\n</script>"
-    replaced = re.sub(
-        r"<script[^>]+src=[\"']sketch\.js[\"'][^>]*>\s*</script>",
-        inline_script,
-        index_html,
-        flags=re.IGNORECASE,
-    )
-
-    if replaced == index_html:
-        if "</body>" in index_html.lower():
-            replaced = re.sub(
-                r"</body>",
-                inline_script + "\n</body>",
-                index_html,
-                count=1,
-                flags=re.IGNORECASE,
-            )
-        else:
-            replaced = index_html + "\n" + inline_script
-
-    if "p5" not in replaced.lower():
-        replaced = replaced.replace(
-            "</head>",
-            '  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>\n</head>',
-        )
-
-    return replaced
+    """Return the single runnable HTML file for preview/download."""
+    return artifacts.single_file_html
 
 
-def build_zip_bytes(files: dict[str, str], standalone_html: str) -> bytes:
+def build_zip_bytes(files: dict[str, str]) -> bytes:
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, content in files.items():
             zf.writestr(name, content)
-        zf.writestr("experiment_standalone.html", standalone_html)
     return buffer.getvalue()
+
+
+def resolve_output_base(output_root_value: str) -> Path:
+    output_base = Path(output_root_value)
+    if not output_base.is_absolute():
+        output_base = APP_ROOT / output_base
+    return output_base
+
+
+def discover_existing_labs(output_root_value: str) -> list[Path]:
+    output_base = resolve_output_base(output_root_value)
+    if not output_base.exists():
+        return []
+
+    html_files = [
+        path
+        for path in output_base.rglob("*.html")
+        if path.is_file() and not path.name.startswith(".")
+    ]
+    return sorted(html_files, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def format_lab_label(path: Path, output_root_value: str) -> str:
+    output_base = resolve_output_base(output_root_value)
+    try:
+        relative = path.relative_to(output_base)
+    except ValueError:
+        relative = path
+    modified = time.strftime("%H:%M %d/%m/%Y", time.localtime(path.stat().st_mtime))
+    return f"{relative.as_posix()}  |  {modified}"
+
+
+def load_existing_lab_html(path: Path) -> str:
+    content = path.read_text(encoding="utf-8")
+    sketch_path = path.with_name("sketch.js")
+    if "sketch.js" in content and sketch_path.exists():
+        return SimulatorArtifacts._inline_sketch(
+            content,
+            sketch_path.read_text(encoding="utf-8"),
+        )
+    return content
 
 
 @st.cache_resource(show_spinner=False)
@@ -306,6 +408,59 @@ suggestions = [
     "Mô phỏng lực hút, đẩy giữa các cực nam châm và độ lệch của la bàn.",
 ]
 
+st.markdown(
+    """
+<div class="library-panel">
+  <h2>Kho thí nghiệm đã sinh</h2>
+  <p>Chọn một file HTML trong generated_labs để chạy lại ngay trong giao diện.</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+existing_labs = discover_existing_labs(output_root)
+if existing_labs:
+    lab_options = {
+        format_lab_label(path, output_root): path
+        for path in existing_labs
+    }
+    selected_label = st.selectbox(
+        "Thí nghiệm có sẵn",
+        options=list(lab_options.keys()),
+        index=0,
+    )
+    selected_lab_path = lab_options[selected_label]
+    selected_lab_html = load_existing_lab_html(selected_lab_path)
+
+    col_preview, col_download, col_path = st.columns([2, 1, 3])
+    with col_preview:
+        preview_existing = st.button(
+            "Chạy thí nghiệm đã chọn",
+            use_container_width=True,
+        )
+    with col_download:
+        st.download_button(
+            "Tải HTML",
+            data=selected_lab_html,
+            file_name=selected_lab_path.name,
+            mime="text/html",
+            use_container_width=True,
+        )
+    with col_path:
+        st.markdown(
+            f'<div class="file-path">{html.escape(str(selected_lab_path))}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if preview_existing:
+        st.session_state["preview_existing_lab"] = str(selected_lab_path)
+
+    if st.session_state.get("preview_existing_lab") == str(selected_lab_path):
+        st.caption("Đang chạy thí nghiệm từ kho generated_labs.")
+        components.html(selected_lab_html, height=820, scrolling=True)
+else:
+    st.info("Chưa tìm thấy file HTML nào trong `generated_labs/`.")
+
 cols = st.columns(4)
 for idx, suggestion in enumerate(suggestions):
     if cols[idx].button(f"Gợi ý {idx + 1}", use_container_width=True):
@@ -324,12 +479,12 @@ if run_btn and not teacher_prompt.strip():
     st.warning("Nhập prompt giáo viên trước khi chạy pipeline.")
 
 if run_btn and teacher_prompt.strip():
-    output_base = Path(output_root)
-    if not output_base.is_absolute():
-        output_base = APP_ROOT / output_base
+    output_base = resolve_output_base(output_root)
 
-    run_name = f"{time.strftime('%Y%m%d-%H%M%S')}-{slugify(teacher_prompt)}"
-    output_dir = output_base / run_name
+    experiment_slug = slugify(teacher_prompt)
+    file_stamp = time.strftime("%H%M%S-%Y%m%d")
+    output_filename = f"{experiment_slug}-{file_stamp}.html"
+    output_dir = output_base
 
     status = st.status("Đang khởi tạo pipeline...", expanded=True)
     started_at = time.time()
@@ -346,18 +501,18 @@ if run_btn and teacher_prompt.strip():
             raise SimulatorOutputError("RAG không tìm thấy đủ dữ liệu phù hợp cho prompt này.")
 
         status.write("Đang tạo kịch bản thí nghiệm từ RAG...")
-        status.write("Đang gọi simulator agent để sinh index.html và sketch.js...")
+        status.write("Đang gọi simulator agent để sinh một file HTML duy nhất...")
         result = pipeline.run(
             teacher_prompt,
             output_dir=output_dir,
+            output_filename=output_filename,
             rag_top_k=rag_top_k,
             context={"ui": "streamlit"},
             write_files=True,
         )
 
         standalone_html = build_standalone_html(result.artifacts)
-        standalone_path = output_dir / "experiment_standalone.html"
-        standalone_path.write_text(standalone_html, encoding="utf-8")
+        standalone_path = result.written_files[0] if result.written_files else output_dir / output_filename
 
         total_seconds = time.time() - started_at
         status.update(label="Pipeline hoàn tất", state="complete", expanded=False)
@@ -366,7 +521,7 @@ if run_btn and teacher_prompt.strip():
         render_metrics(
             rag_seconds=rag_seconds,
             total_seconds=total_seconds,
-            files_count=len(result.written_files) + 1,
+            files_count=len(result.written_files),
             output_dir=output_dir,
         )
 
@@ -387,32 +542,27 @@ if run_btn and teacher_prompt.strip():
         )
 
         with tab_preview:
-            st.caption("Preview dùng bản HTML standalone đã inline sketch.js.")
+            st.caption("Preview dùng file HTML duy nhất đã inline toàn bộ mã mô phỏng.")
             components.html(standalone_html, height=820, scrolling=True)
 
         with tab_files:
-            zip_bytes = build_zip_bytes(result.artifacts.files, standalone_html)
+            zip_bytes = build_zip_bytes({standalone_path.name: standalone_html})
             st.download_button(
                 "Tải toàn bộ thí nghiệm (.zip)",
                 data=zip_bytes,
-                file_name=f"{output_dir.name}.zip",
+                file_name=f"{standalone_path.stem}.zip",
                 mime="application/zip",
                 use_container_width=True,
             )
             st.download_button(
-                "Tải file HTML standalone",
+                "Tải file HTML thí nghiệm",
                 data=standalone_html,
-                file_name="experiment_standalone.html",
+                file_name=standalone_path.name,
                 mime="text/html",
                 use_container_width=True,
             )
-            col_html, col_js = st.columns(2)
-            with col_html:
-                st.markdown("#### index.html")
-                st.code(result.artifacts.index_html, language="html")
-            with col_js:
-                st.markdown("#### sketch.js")
-                st.code(result.artifacts.sketch_js, language="javascript")
+            st.markdown(f"#### {standalone_path.name}")
+            st.code(standalone_html, language="html")
 
         with tab_script:
             if show_script:

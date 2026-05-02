@@ -46,27 +46,71 @@ class SimulatorArtifacts:
     architecture: str
     index_html: str
     sketch_js: str
+    experiment_html: str = ""
     raw_output: str = ""
     validation_checklist: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def files(self) -> dict[str, str]:
-        return {
-            "index.html": self.index_html,
-            "sketch.js": self.sketch_js,
-        }
+        return {"experiment.html": self.single_file_html}
 
-    def write_to(self, output_dir: str | Path) -> list[Path]:
-        """Write ``index.html`` and ``sketch.js`` to *output_dir*."""
+    @property
+    def single_file_html(self) -> str:
+        """Return the runnable one-file HTML artifact."""
+        if self.experiment_html.strip():
+            return self.experiment_html.strip()
+        return self._inline_sketch(self.index_html, self.sketch_js)
+
+    def write_to(self, output_dir: str | Path, filename: str = "experiment.html") -> list[Path]:
+        """Write the runnable experiment as a single HTML file."""
         target = Path(output_dir)
         target.mkdir(parents=True, exist_ok=True)
 
-        written: list[Path] = []
-        for filename, content in self.files.items():
-            path = target / filename
-            path.write_text(content, encoding="utf-8")
-            written.append(path)
-        return written
+        safe_filename = Path(filename).name or "experiment.html"
+        if not safe_filename.lower().endswith(".html"):
+            safe_filename += ".html"
+
+        path = target / safe_filename
+        path.write_text(self.single_file_html, encoding="utf-8")
+        return [path]
+
+    @staticmethod
+    def _inline_sketch(index_html: str, sketch_js: str) -> str:
+        """Inline sketch.js into index.html for standalone browser execution."""
+        html = (index_html or "").strip()
+        sketch = (sketch_js or "").strip()
+
+        if not html:
+            html = SimulatorOutputParser.default_index_html()
+
+        if sketch:
+            inline_script = f"<script>\n{sketch}\n</script>"
+            replaced = re.sub(
+                r"<script[^>]+src=[\"']sketch\.js[\"'][^>]*>\s*</script>",
+                inline_script,
+                html,
+                flags=re.IGNORECASE,
+            )
+            if replaced == html:
+                if "</body>" in html.lower():
+                    replaced = re.sub(
+                        r"</body>",
+                        inline_script + "\n</body>",
+                        html,
+                        count=1,
+                        flags=re.IGNORECASE,
+                    )
+                else:
+                    replaced = html + "\n" + inline_script
+            html = replaced
+
+        if "p5" not in html.lower():
+            html = SimulatorOutputParser._insert_before(
+                html,
+                "</head>",
+                '  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>\n',
+            )
+        return html
 
 
 class SimulatorOutputParser:
@@ -93,6 +137,7 @@ class SimulatorOutputParser:
         structured_understanding = ""
         dsl = ""
         architecture = ""
+        experiment_html = ""
         index_html = ""
         sketch_js = ""
         validation: tuple[str, ...] = ()
@@ -117,11 +162,16 @@ class SimulatorOutputParser:
             )
 
             files = payload.get("files") if isinstance(payload.get("files"), dict) else {}
+            experiment_html = self._stringify(
+                files.get("experiment.html")
+                or files.get("experiment_html")
+                or payload.get("experiment_html")
+                or payload.get("html")
+            )
             index_html = self._stringify(
                 files.get("index.html")
                 or files.get("index_html")
                 or payload.get("index_html")
-                or payload.get("html")
             )
             sketch_js = self._stringify(
                 files.get("sketch.js")
@@ -132,6 +182,7 @@ class SimulatorOutputParser:
                 or payload.get("js")
             )
 
+        experiment_html = self._strip_outer_fence(experiment_html)
         if not index_html:
             index_html = (
                 parsed.first_block("html")
@@ -149,17 +200,30 @@ class SimulatorOutputParser:
         index_html = self._strip_outer_fence(index_html)
         sketch_js = self._strip_outer_fence(sketch_js)
 
-        if not sketch_js and index_html:
+        if experiment_html:
+            if not self._extract_inline_script(experiment_html) and sketch_js:
+                experiment_html = SimulatorArtifacts._inline_sketch(
+                    experiment_html,
+                    sketch_js,
+                )
+            index_html = self._ensure_p5_html(experiment_html)
+            sketch_js = self._extract_inline_script(index_html)
+        elif not sketch_js and index_html:
             inline_script = self._extract_inline_script(index_html)
             if inline_script:
                 sketch_js = inline_script
+                experiment_html = self._ensure_p5_html(index_html)
                 index_html = self.default_index_html()
 
         if not index_html:
             index_html = self.default_index_html()
 
         index_html = self._ensure_p5_index(index_html)
+        if not experiment_html:
+            experiment_html = SimulatorArtifacts._inline_sketch(index_html, sketch_js)
+
         self.validate(index_html=index_html, sketch_js=sketch_js)
+        self.validate_experiment_html(experiment_html)
 
         return SimulatorArtifacts(
             structured_understanding=structured_understanding,
@@ -167,6 +231,7 @@ class SimulatorOutputParser:
             architecture=architecture,
             index_html=index_html,
             sketch_js=sketch_js,
+            experiment_html=experiment_html,
             raw_output=raw_output,
             validation_checklist=validation,
         )
@@ -185,6 +250,22 @@ class SimulatorOutputParser:
             raise SimulatorOutputError("index.html must load sketch.js.")
         if "p5" not in index_html.lower():
             raise SimulatorOutputError("index.html must load p5.js.")
+
+    def validate_experiment_html(self, experiment_html: str) -> None:
+        """Validate the single-file runnable HTML artifact."""
+        if not experiment_html or not experiment_html.strip():
+            raise SimulatorOutputError("Missing experiment.html content.")
+        if "p5" not in experiment_html.lower():
+            raise SimulatorOutputError("experiment.html must load p5.js.")
+        inline_script = self._extract_inline_script(experiment_html)
+        if not inline_script:
+            raise SimulatorOutputError("experiment.html must inline the simulation script.")
+        if not self._SETUP_PATTERN.search(inline_script):
+            raise SimulatorOutputError("experiment.html script must define p5 setup().")
+        if not self._DRAW_PATTERN.search(inline_script):
+            raise SimulatorOutputError("experiment.html script must define p5 draw().")
+        if "createCanvas" not in inline_script and "createcanvas" not in inline_script.lower():
+            raise SimulatorOutputError("experiment.html script must create a p5 canvas.")
 
     @staticmethod
     def default_index_html(title: str = "Virtual Lab Simulation") -> str:
@@ -301,6 +382,20 @@ class SimulatorOutputParser:
 
         return html
 
+    @classmethod
+    def _ensure_p5_html(cls, experiment_html: str) -> str:
+        html = experiment_html.strip()
+        if not html:
+            return html
+
+        if "p5" not in html.lower():
+            html = cls._insert_before(
+                html,
+                "</head>",
+                '  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>\n',
+            )
+        return html
+
     @staticmethod
     def _insert_before(html: str, marker: str, snippet: str) -> str:
         idx = html.lower().find(marker.lower())
@@ -311,7 +406,7 @@ class SimulatorOutputParser:
 
 class SimulatorAgent(BaseAgent):
     """
-    Agent that receives a grounded experiment script and returns runnable p5.js.
+    Agent that receives a grounded experiment script and returns runnable HTML.
     """
 
     _SYSTEM_PROMPT = (
@@ -319,7 +414,7 @@ class SimulatorAgent(BaseAgent):
         "You are a senior p5.js simulation engineer and science-education "
         "simulation designer.\n\n"
         "Your job is to convert a grounded experiment script plus retrieved RAG "
-        "context into executable simulator files: index.html and sketch.js.\n\n"
+        "context into one executable simulator HTML file.\n\n"
         "GROUNDING RULES:\n"
         "1) Treat Retrieved Scientific Context as the authoritative source. The "
         "scripting output is useful, but RAG wins if there is any conflict.\n"
@@ -340,17 +435,17 @@ class SimulatorAgent(BaseAgent):
         "- Use deterministic, named state variables for the core science model.\n"
         "- Prefer data-driven rendering from extracted RAG constants.\n"
         "- Include teacher/student friendly Vietnamese UI text where visible.\n"
-        "- Keep files self-contained except for the p5.js CDN in index.html.\n\n"
+        "- Return one self-contained HTML document with all JavaScript inlined. "
+        "The only external dependency allowed is the p5.js CDN script.\n\n"
         "OUTPUT CONTRACT:\n"
         "Return ONLY one valid JSON object. Do not wrap it in Markdown fences. "
         "The JSON object must follow this schema:\n"
         "{\n"
         '  "structured_understanding": "exhaustive extracted facts and simulation intent",\n'
         '  "dsl": "entities, parameters, physics/state rules, interactions, visualization",\n'
-        '  "architecture": "module-level design of the generated sketch.js",\n'
+        '  "architecture": "module-level design of the generated inline HTML simulation",\n'
         '  "files": {\n'
-        '    "index.html": "<full HTML document loading p5.js and sketch.js>",\n'
-        '    "sketch.js": "<full runnable JavaScript code>"\n'
+        '    "experiment.html": "<full standalone HTML document loading p5.js CDN and inlining all simulation JavaScript>"\n'
         "  },\n"
         '  "validation_checklist": ["fact coverage checks", "runtime checks"]\n'
         "}"
@@ -477,7 +572,7 @@ class SimulatorAgent(BaseAgent):
                 ),
                 (
                     "Generate the JSON output contract now. The files must run "
-                    "as index.html + sketch.js in a browser."
+                    "as one standalone experiment.html file in a browser."
                 ),
             ]
         )

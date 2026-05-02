@@ -18,7 +18,7 @@ from src.agents.simulator import SimulatorAgent, SimulatorOutputError
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate p5.js simulator files from a grounded script."
+        description="Generate one standalone HTML simulator file from a grounded script."
     )
     parser.add_argument("--script", required=True, help="Grounded scripting output file.")
     parser.add_argument(
@@ -39,7 +39,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--out-dir",
         default="generated_experiment",
-        help="Directory for index.html and sketch.js.",
+        help="Directory for the generated standalone HTML file.",
     )
     parser.add_argument(
         "--model",

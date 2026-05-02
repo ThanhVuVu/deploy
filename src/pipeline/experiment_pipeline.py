@@ -87,6 +87,7 @@ class ExperimentGenerationPipeline:
         teacher_prompt: str,
         *,
         output_dir: str | Path | None = None,
+        output_filename: str | None = None,
         rag_top_k: int = 4,
         context: Optional[dict[str, Any]] = None,
         write_files: bool = True,
@@ -120,7 +121,12 @@ class ExperimentGenerationPipeline:
         written: tuple[Path, ...] = ()
         resolved_output_dir: Optional[Path] = Path(output_dir) if output_dir else None
         if write_files and resolved_output_dir is not None:
-            written = tuple(artifacts.write_to(resolved_output_dir))
+            written = tuple(
+                artifacts.write_to(
+                    resolved_output_dir,
+                    filename=output_filename or "experiment.html",
+                )
+            )
 
         return ExperimentPipelineResult(
             teacher_prompt=prompt,

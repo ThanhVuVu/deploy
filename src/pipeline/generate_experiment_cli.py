@@ -21,7 +21,7 @@ from src.pipeline.experiment_pipeline import ExperimentGenerationPipeline
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate grounded p5.js simulation files from a teacher prompt."
+        description="Generate one grounded standalone HTML simulation from a teacher prompt."
     )
     parser.add_argument(
         "prompt",
@@ -35,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--out-dir",
         default="generated_experiment",
-        help="Directory for index.html and sketch.js (default: generated_experiment).",
+        help="Directory for the generated standalone HTML file (default: generated_experiment).",
     )
     parser.add_argument(
         "--rag-top-k",
