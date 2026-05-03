@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang='vi'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Tác dụng cản trở dòng điện của đoạn dây dẫn</title>
+<script src='https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js'></script>
+<style>
+body{margin:0;background:#eef3f7;font-family:Arial,Helvetica,sans-serif;color:#123}#wrap{width:1120px;margin:0 auto}.ctrl{background:#fff;border:1px solid #cfd8dc;border-radius:10px;padding:8px;margin:6px 0;box-shadow:0 1px 4px #0001}button{margin:4px;padding:7px 10px;border-radius:8px;border:1px solid #789;background:#e3f2fd;cursor:pointer}button:hover{background:#bbdefb}input{vertical-align:middle}.note{font-size:13px;color:#345}</style>
+</head>
+<body>
+<div id='wrap'>
+<div class='ctrl' id='controls'></div>
+<div id='sketch-holder'></div>
+<div class='note'>Mô phỏng giáo dục dựa trên nguồn truy xuất. Các hạt điện tích là hình ảnh mô hình hóa để thấy dòng chuyển dời có hướng; giá trị số có nhãn [Standard Simulation Values].</div>
+</div>
+<script>
+// Grounding map constants from retrieved context.
+const SOURCES=[
+{key:'T1',src:'science_db_9.pdf p.64',claim:'AC qua cuộn dây kín hút sắt/thép; tác dụng từ; ứng dụng chuông điện, rơ-le, bếp từ.'},
+{key:'T2',src:'science_db_8.pdf p.97',claim:'Nhận biết dòng điện qua tác dụng: nhiệt, phát sáng, sinh lí; vật dẫn nóng lên khi có dòng điện.'},
+{key:'T3',src:'science_db_9.pdf p.63',claim:'AC có tác dụng nhiệt, phát sáng, từ, sinh lí; bàn là, máy sưởi, bếp hồng ngoại nóng lên; điện năng AC chuyển thành nhiệt.'},
+{key:'T4',src:'science_db_9.pdf p.64',claim:'Chuông điện AC: cuộn dây có lõi sắt thành nam châm điện, hút lá thép làm búa gõ; lõi sắt tăng tác dụng từ; cuộn dây cũng nóng.'},
+{key:'T5',src:'science_db_9.pdf p.48',claim:'Điện trở tương đương thay thế đoạn mạch để cùng U thì I như trước; dòng điện là chuyển dời có hướng; mọi điện trở cản trở dòng điện; mắc nối tiếp nhiều điện trở làm cản trở nhiều hơn, Rtd lớn hơn mỗi Ri.'},
+{key:'IMG6',src:'science_db_8.pdf p.83 image',claim:'Ảnh đòn bẩy: cần câu, bật nắp chai, đũa, kẹp hạt, kéo, chèo thuyền; ngoài phạm vi mô hình điện.'}
+];
+// [Standard Simulation Values] Quantitative values chosen because RAG gives qualitative relations but no numbers.
+const STANDARD_SIM_VALUES={voltageDefault:9,voltageMin:3,voltageMax:12,resistors:[5,8,12,18,25],currentLaw:'I = U / Rtd dùng như mô hình minh họa',acHzLabel:50,ironCoreFactor:2,heatRule:'độ nóng tương đối ∝ I²R'};
+let voltageSlider,countSlider,modeButton,coreCheckbox,resetButton;
+let useEquivalent=false;
+let particles=[];
+let acPhase=0;
+function setup(){
+let c=createCanvas(1120,720);c.parent('sketch-holder');textFont('Arial');
+let panel=select('#controls');
+createSpan('<b>TÁC DỤNG CẢN TRỞ DÒNG ĐIỆN CỦA ĐOẠN DÂY DẪN</b> &nbsp; ').parent(panel);
+createSpan('Số điện trở nối tiếp: ').parent(panel);countSlider=createSlider(1,5,2,1);countSlider.parent(panel);
+createSpan(' &nbsp; Hiệu điện thế U: ').parent(panel);voltageSlider=createSlider(3,12,9,0.5);voltageSlider.parent(panel);
+modeButton=createButton('Thay bằng R tương đương');modeButton.parent(panel);modeButton.mousePressed(()=>{useEquivalent=!useEquivalent;modeButton.html(useEquivalent?'Xem các điện trở nối tiếp':'Thay bằng R tương đương');});
+coreCheckbox=createCheckbox(' Bật lõi sắt trong cuộn dây AC',true);coreCheckbox.parent(panel);
+resetButton=createButton('Đặt lại');resetButton.parent(panel);resetButton.mousePressed(()=>{countSlider.value(2);voltageSlider.value(9);useEquivalent=false;coreCheckbox.checked(true);});
+for(let i=0;i<34;i++){particles.push({t:i/34,off:random(0.2,0.8)});} }
+function computeModel(){let n=countSlider.value();let vals=STANDARD_SIM_VALUES.resistors.slice(0,n);let r=vals.reduce((a,b)=>a+b,0);let u=voltageSlider.value();let i=u/r;return{n:n,vals:vals,R:r,U:u,I:i,maxRi:max(vals)};}
+function draw(){background('#eef3f7');let m=computeModel();acPhase+=0.06;drawTitle(m);drawCircuit(m);drawHud(m);drawAcEffects(m);drawGroundingMap();}
+function drawTitle(m){fill('#0b3558');textSize(22);textStyle(BOLD);text('Mô phỏng: điện trở cản trở dòng điện',24,34);textStyle(NORMAL);textSize(13);fill('#355');text('Nguồn chính: T5. Kéo thanh trượt để tăng số điện trở nối tiếp và quan sát Rtd tăng, I mô phỏng giảm.',24,55);}
+function drawCircuit(m){let x=40,y=82,w=650,h=360;stroke('#607d8b');strokeWeight(2);fill('#fff');rect(x,y,w,h,14);fill('#123');noStroke();textSize(16);textStyle(BOLD);text('1) Đoạn mạch một chiều: sự cản trở của điện trở',x+18,y+28);textStyle(NORMAL);let left=x+70,right=x+w-70,top=y+92,bottom=y+h-72;stroke('#263238');strokeWeight(4);noFill();line(left,top,right,top);line(right,top,right,bottom);line(right,bottom,left,bottom);line(left,bottom,left,top);
+// battery
+strokeWeight(3);stroke('#111');line(left-18,top+55,left+18,top+55);line(left-10,top+78,left+10,top+78);noStroke();fill('#111');textSize(12);text('Nguồn U='+nf(m.U,1,1)+' V',left-35,top+105);fill('#e3f2fd');stroke('#1565c0');rect(left-44,top+115,88,35,8);noStroke();fill('#0d47a1');textAlign(CENTER,CENTER);text('cùng U',left,top+132);textAlign(LEFT,BASELINE);
+// lamp
+let lampX=right,lampY=(top+bottom)/2;stroke('#333');strokeWeight(3);line(right,lampY-45,right,lampY-22);line(right,lampY+22,right,lampY+45);fill(255, m.I>0?235:255, m.I>0?90:230, m.I>0?210:80);stroke('#f9a825');ellipse(lampX,lampY,44,44);noStroke();fill('#333');textSize(12);text('Đèn: tác dụng phát sáng [T2,T3]',right-120,lampY+42);
+// resistors on top
+let resY=top;let start=left+115;let gap=86;if(useEquivalent){drawResistor(start+115,resY,190,'Rtd='+m.R+' Ω',m.I,m.R,true);}else{for(let k=0;k<m.n;k++){drawResistor(start+k*gap,resY,58,'R'+(k+1)+'='+m.vals[k]+' Ω',m.I,m.vals[k],false);}}
+drawParticles(m,left,right,top,bottom);
+// explanation labels
+fill('#263238');textSize(13);let msg=useEquivalent?'Đang dùng 1 điện trở tương đương: theo T5, với cùng U thì I giữ như đoạn mạch ban đầu.':'Đang mắc nối tiếp: đi qua nhiều điện trở hơn → bị cản trở nhiều hơn [T5].';text(msg,x+18,y+h-35);}
+function drawResistor(cx,cy,len,label,I,R,isEq){push();translate(cx,cy);stroke('#4e342e');strokeWeight(3);let heat=min(255,60+I*R*10);fill(255,120,60,90);if(I>0){noStroke();fill(255,90,30,map(heat,60,255,35,120));ellipse(len/2,0,len+22,42);}stroke('#5d4037');noFill();beginShape();vertex(0,0);let steps=8;for(let i=1;i<steps;i++){vertex(i*len/steps,(i%2===0?-1:1)*14);}vertex(len,0);endShape();noStroke();fill('#3e2723');textSize(12);textAlign(CENTER);text(label,len/2,-24);fill('#bf360c');text('nóng lên khi có I [T2]',len/2,34);if(isEq){fill('#0d47a1');text('thay thế đoạn mạch [T5]',len/2,50);}textAlign(LEFT);pop();}
+function pathPoint(t,left,right,top,bottom){let p=t%1;let L1=right-left,L2=bottom-top,total=2*(L1+L2);let d=p*total;if(d<L1)return{x:left+d,y:top};d-=L1;if(d<L2)return{x:right,y:top+d};d-=L2;if(d<L1)return{x:right-d,y:bottom};d-=L1;return{x:left,y:bottom-d};}
+function drawParticles(m,left,right,top,bottom){let speed=0.0015+m.I*0.006;for(let p of particles){p.t=(p.t+speed)%1;let q=pathPoint(p.t,left,right,top,bottom);noStroke();fill('#1976d2');ellipse(q.x,q.y,7,7);}fill('#0d47a1');textSize(12);text('Các chấm xanh: mô hình hóa dòng chuyển dời có hướng của hạt mang điện [T5].',left+80,bottom+28);}
+function drawHud(m){let x=720,y=82,w=370,h=250;stroke('#b0bec5');strokeWeight(1);fill('#fff');rect(x,y,w,h,14);noStroke();fill('#123');textSize(16);textStyle(BOLD);text('2) Bảng đo và kết luận',x+16,y+28);textStyle(NORMAL);textSize(13);fill('#263238');let lines=[
+'U = '+nf(m.U,1,1)+' V [Standard Simulation Values]',
+'Ri đang dùng = '+m.vals.join(' Ω, ')+' Ω',
+'Rtd = tổng Ri = '+m.R+' Ω [mô hình nối tiếp]',
+'I mô phỏng = U/Rtd = '+nf(m.I,1,3)+' A [Standard Simulation Values]',
+'Rtd > mỗi Ri? '+(m.R>m.maxRi?'Đúng, phù hợp T5':'Chỉ có 1 Ri nên Rtd = Ri'),
+'Mọi điện trở cản trở dòng điện [T5]',
+'Tăng số điện trở → Rtd tăng → hạt chạy chậm hơn [T5]'
+];for(let i=0;i<lines.length;i++){text(lines[i],x+18,y+58+i*24);}fill('#e8f5e9');stroke('#66bb6a');rect(x+18,y+220,330,24,6);noStroke();fill('#1b5e20');text('Điện trở tương đương: thay thế mà cùng U thì I như trước [T5]',x+26,y+237);}
+function drawAcEffects(m){let x=40,y=462,w=650,h=230;stroke('#b0bec5');fill('#fff');rect(x,y,w,h,14);noStroke();fill('#123');textSize(16);textStyle(BOLD);text('3) Dấu hiệu nhận biết dòng điện qua các tác dụng',x+18,y+28);textStyle(NORMAL);let coilX=x+160,coilY=y+118;let core=coreCheckbox.checked();let s=sin(acPhase);let mag=abs(s)*(core?STANDARD_SIM_VALUES.ironCoreFactor:1);stroke('#6a1b9a');strokeWeight(3);noFill();for(let i=0;i<6;i++){arc(coilX+i*17,coilY,22,46,HALF_PI,PI+HALF_PI);}if(core){stroke('#455a64');strokeWeight(7);line(coilX-5,coilY,coilX+95,coilY);}noStroke();fill('#4a148c');textSize(12);text('Cuộn dây kín có AC '+STANDARD_SIM_VALUES.acHzLabel+' Hz',coilX-45,coilY-48);text('hút sắt/thép: tác dụng từ [T1]',coilX-55,coilY+58);fill(255,90,30,80+mag*40);ellipse(coilX+45,coilY,145,72);fill('#bf360c');text('cuộn dây cũng nóng [T4]',coilX-45,coilY+76);
+// iron object and bell hammer
+let objX=coilX+190-mag*18;fill('#78909c');rect(objX,coilY-16,44,32,4);fill('#263238');text('sắt/thép',objX,coilY-24);let leafX=x+455;let amp=(core?28:13)*sin(acPhase*(core?2.0:1.3));stroke('#37474f');strokeWeight(4);line(leafX,coilY-48,leafX+amp,coilY+12);fill('#37474f');noStroke();ellipse(leafX+amp,coilY+12,12,12);stroke('#5d4037');strokeWeight(3);line(leafX+amp,coilY+12,leafX+amp+42,coilY-8);fill('#fbc02d');stroke('#795548');ellipse(leafX+amp+58,coilY-12,54,54);noStroke();fill('#3e2723');text('Chuông điện AC: nam châm điện hút lá thép, búa gõ liên tục [T4]',x+360,y+190);
+fill('#263238');textSize(13);text('Tác dụng nhiệt: vật dẫn nóng lên khi có dòng điện [T2,T3].',x+18,y+188);text('Tác dụng phát sáng: đèn sáng khi có dòng điện [T2,T3]. Tác dụng sinh lí: chỉ nêu cảnh báo, không mô phỏng trên cơ thể.',x+18,y+208);fill('#0d47a1');text('Lõi sắt '+(core?'BẬT: tăng tác dụng từ, lá thép dao động mạnh/nhanh hơn [T4]':'TẮT: tác dụng từ yếu hơn')+'.',x+18,y+52);}
+function drawGroundingMap(){let x=720,y=352,w=370,h=340;stroke('#b0bec5');fill('#fff');rect(x,y,w,h,14);noStroke();fill('#123');textSize(16);textStyle(BOLD);text('4) Bản đồ nguồn truy xuất',x+16,y+28);textStyle(NORMAL);textSize(11);let yy=y+52;for(let s of SOURCES){fill('#eceff1');rect(x+14,yy-14,w-28,42,6);fill('#0b3558');textStyle(BOLD);text(s.key+' — '+s.src,x+22,yy);textStyle(NORMAL);fill('#263238');wrapText(s.claim,x+22,yy+13,w-44,12);yy+=50;}fill('#fff3e0');rect(x+14,y+h-42,w-28,28,6);fill('#e65100');text('[Standard Simulation Values]: U, Ω, I=U/Rtd, I²R, hệ số lõi sắt chỉ để minh họa vì nguồn không cho số liệu.',x+22,y+h-24);}
+function wrapText(str,x,y,maxW,lineH){let words=str.split(' ');let line='';for(let i=0;i<words.length;i++){let test=line+words[i]+' ';if(textWidth(test)>maxW&&i>0){text(line,x,y);line=words[i]+' ';y+=lineH;}else{line=test;}}text(line,x,y);}
+</script>
+</body>
+</html>

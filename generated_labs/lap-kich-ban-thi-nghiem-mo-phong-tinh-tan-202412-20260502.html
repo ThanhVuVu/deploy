@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang='vi'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Mô phỏng tính tan của khí oxygen trong nước</title>
+<script src='https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js'></script>
+<style>
+body{margin:0;background:#eef7fb;font-family:Arial,Helvetica,sans-serif;color:#123} .wrap{max-width:1180px;margin:0 auto;padding:10px} #sketch-holder{border:1px solid #9bb;border-radius:12px;overflow:hidden;background:white} .controls{display:grid;grid-template-columns:repeat(4,minmax(180px,1fr));gap:8px;margin-top:8px} .ctrl{background:#fff;border:1px solid #bdd;border-radius:10px;padding:8px;font-size:14px} button{border:0;border-radius:8px;background:#1976d2;color:white;padding:8px 12px;cursor:pointer} button:hover{background:#0d47a1} input{width:100%} .note{font-size:13px;background:#fff9db;border:1px solid #e0c66b;border-radius:10px;padding:8px;margin-top:8px}
+</style>
+</head>
+<body>
+<div class='wrap'>
+<h2>Thí nghiệm mô phỏng: Tính tan của khí oxygen trong nước</h2>
+<div id='sketch-holder'></div>
+<div id='controls' class='controls'></div>
+<div class='note'><b>Lưu ý nguồn dữ liệu:</b> RAG cung cấp kiến thức về oxygen trong không khí, sự cháy và thí nghiệm quang hợp giải phóng oxygen; không cung cấp số liệu độ tan O2 trong nước. Các số liệu độ tan trong phần mô phỏng chính được ghi rõ là <b>[Standard Simulation Values]</b>.</div>
+</div>
+<script>
+// ================= GROUNDING MAP =================
+// [T2/P50] science_db_6.pdf p50: air is approx 21% oxygen, 78% nitrogen, rest CO2, water vapour and other gases; candle under inverted glass, water rises as oxygen is consumed.
+// [I6/P50] image p50: colored water, candle, inverted glass tube; when candle burns oxygen is consumed and water level rises after flame goes out.
+// [T4/P47] science_db_6.pdf p47: oxygen maintains combustion and life; glowing splint in oxygen; fuels: wood, coal, petroleum, natural gas.
+// [T3/P105] science_db_9.pdf p105: butane burning gives heat, CO2 and H2O; 2C4H10 + 13O2 -> 8CO2 + 10H2O; about 5 mL limewater.
+// [T1/P110] science_db_7.pdf p110: photosynthesis releases oxygen; two hydrilla branches in test tubes, tips downward, fill water, invert into cups A/B with no air bubbles. Also starch test steps: black paper, ethanol 90°, warm water rinse, iodine in Petri dish.
+// [T5/P111] science_db_7.pdf p111: result table for photosynthesis starch and oxygen experiments.
+// [SSV] Standard Simulation Values: O2 solubility model and numerical values below are simulator-only because RAG has no O2-in-water solubility data.
+const RAG_FACTS={airO2:21,airN2:78,airOther:1,ethanolDeg:90,limewater_mL:5,butaneEq:'2C4H10 + 13O2 → 8CO2 + 10H2O'};
+const STANDARD_SIM_VALUES={waterVolume_L:1.0,o2Sat20C_mgL:9.1,tempSlope_mgL_per_C:0.20,baseRate_per_s:0.012,stirRate_per_s:0.050,photosynthesisRate_units:0.020};
+let tempSlider,o2Slider,stirSlider,lightSlider,resetBtn,eqBtn;
+let waterTempC=20,gasO2Percent=21,stirLevel=30,lightIntensity=55;
+let dissolvedO2_mgL=6.5,targetO2_mgL=9.1;
+let candleO2Percent=RAG_FACTS.airO2,candleWaterRise=0,candleLit=true;
+let tubeAOxygen=0,tubeBOxygen=0;
+function setup(){
+  let c=createCanvas(1160,760); c.parent('sketch-holder'); textFont('Arial');
+  makeControls();
+}
+function makeControls(){
+  const holder=select('#controls');
+  function box(label,el){let d=createDiv('<b>'+label+'</b>');d.class('ctrl');el.parent(d);d.parent(holder);return d;}
+  tempSlider=createSlider(0,40,20,1); box('Nhiệt độ nước °C [SSV]',tempSlider);
+  o2Slider=createSlider(5,100,21,1); box('% oxygen trong khí phía trên nước',o2Slider);
+  stirSlider=createSlider(0,100,30,1); box('Mức khuấy/trộn nước [SSV]',stirSlider);
+  lightSlider=createSlider(0,100,55,1); box('Ánh sáng cho rong đuôi chó [T1/P110 + SSV]',lightSlider);
+  resetBtn=createButton('Đặt lại mô phỏng'); resetBtn.mousePressed(()=>{dissolvedO2_mgL=6.5;candleO2Percent=21;candleWaterRise=0;candleLit=true;tubeAOxygen=0;tubeBOxygen=0;}); box('Điều khiển',resetBtn);
+  eqBtn=createButton('Bão hòa ngay'); eqBtn.mousePressed(()=>{dissolvedO2_mgL=targetO2_mgL;}); box('Thao tác nhanh',eqBtn);
+}
+function draw(){
+  background(242,250,253);
+  readInputs(); updateModel();
+  drawTitle(); drawMainBeaker(); drawHUD(); drawAirComposition(40,610,420,34); drawCandleDemo(500,92); drawPhotosynthesisDemo(500,355); drawFactPanel(805,92); drawSourceTrace(805,600);
+}
+function readInputs(){waterTempC=tempSlider.value();gasO2Percent=o2Slider.value();stirLevel=stirSlider.value();lightIntensity=lightSlider.value();}
+function computeTargetO2(){let sat=max(0.5,STANDARD_SIM_VALUES.o2Sat20C_mgL-STANDARD_SIM_VALUES.tempSlope_mgL_per_C*(waterTempC-20));return sat*(gasO2Percent/RAG_FACTS.airO2);}
+function updateModel(){
+  targetO2_mgL=computeTargetO2();
+  let dt=1/60; let rate=STANDARD_SIM_VALUES.baseRate_per_s+STANDARD_SIM_VALUES.stirRate_per_s*(stirLevel/100);
+  dissolvedO2_mgL += (targetO2_mgL-dissolvedO2_mgL)*rate*dt*60;
+  if(lightIntensity>2){let prod=STANDARD_SIM_VALUES.photosynthesisRate_units*(lightIntensity/100);tubeAOxygen=min(1,tubeAOxygen+prod*dt);tubeBOxygen=min(1,tubeBOxygen+prod*dt*0.55);} 
+  if(candleLit){candleO2Percent-=0.035;if(candleO2Percent<=15.5){candleO2Percent=15.5;candleLit=false;}candleWaterRise=map(21-candleO2Percent,0,5.5,0,1,true);} }
+function drawTitle(){fill(10,60,90);noStroke();textSize(22);textStyle(BOLD);text('Tính tan của O₂ trong nước: hòa tan ⇄ thoát khí',30,36);textStyle(NORMAL);textSize(13);fill(80);text('Mô hình chính dùng [Standard Simulation Values]; các ô phụ hiển thị kiến thức RAG về oxygen.',30,58);}
+function drawMainBeaker(){
+  let x=40,y=92,w=420,h=480; noFill(); stroke(40,90,110); strokeWeight(3); rect(x,y,w,h,12); noStroke(); fill(175,220,245,205); rect(x+14,y+105,w-28,h-120,8); fill(210,238,250); rect(x+14,y+105,w-28,20,8);
+  fill(30,110,180);textSize(16);textStyle(BOLD);text('Cốc nước mô phỏng 1,0 L [SSV]',x+20,y+28);textStyle(NORMAL);textSize(12);fill(40);text('Các chấm xanh là O₂ hòa tan; số chấm thay đổi theo nồng độ.',x+20,y+50);
+  // gas headspace particles
+  for(let i=0;i<60;i++){let px=x+25+(i*37%370);let py=y+70+((i*19)%28);let r=(i%100)<gasO2Percent?color(20,135,230):color(150,160,170);fill(r);circle(px,py,5);} fill(20,135,230);text('Pha khí: O₂ '+gasO2Percent+'%',x+250,y+92);
+  let count=floor(map(dissolvedO2_mgL,0,20,8,115,true));
+  for(let i=0;i<count;i++){let px=x+35+((i*53+frameCount*0.35*(1+stirLevel/30))%(w-70));let py=y+140+((i*97+sin((frameCount+i)*0.04)*18)%(h-170));fill(0,120,255,170);noStroke();circle(px,py,7);}
+  // arrows
+  let arrowColor=targetO2_mgL>dissolvedO2_mgL?color(0,120,255):color(230,120,20);stroke(arrowColor);strokeWeight(3);let ax=x+w-70;for(let k=0;k<3;k++){let yy=y+150+k*70;line(ax,yy,ax,yy+(targetO2_mgL>dissolvedO2_mgL?35:-35));let dir=targetO2_mgL>dissolvedO2_mgL?1:-1;line(ax,yy+dir*35,ax-7,yy+dir*25);line(ax,yy+dir*35,ax+7,yy+dir*25);}noStroke();fill(arrowColor);textSize(12);text(targetO2_mgL>dissolvedO2_mgL?'O₂ đang hòa tan thêm':'O₂ đang thoát bớt',x+w-145,y+365);
+}
+function drawHUD(){
+  let x=40,y=575,w=420; fill(255);stroke(190,215,225);rect(x,y,w,28,8);noStroke();let frac=constrain(dissolvedO2_mgL/max(1,targetO2_mgL),0,1.3);fill(frac<0.95?color(255,193,7):color(76,175,80));rect(x+2,y+2,(w-4)*min(frac,1),24,7);fill(20);textSize(14);text('O₂ hòa tan hiện tại: '+nf(dissolvedO2_mgL,1,2)+' mg/L  |  Mục tiêu cân bằng: '+nf(targetO2_mgL,1,2)+' mg/L [SSV]',x+10,y+19);
+  fill(20,70,90);textSize(13);text('Quy luật mô phỏng [SSV]: nhiệt độ tăng → độ tan giảm; %O₂ pha khí tăng → độ tan tăng; khuấy nhanh → đạt cân bằng nhanh hơn.',x,665);
+}
+function drawAirComposition(x,y,w,h){fill(20,70,90);textSize(15);textStyle(BOLD);text('Thành phần không khí theo thể tích [T2/P50]',x,y-12);textStyle(NORMAL);let o2w=w*0.21,n2w=w*0.78,ow=w-o2w-n2w;noStroke();fill(30,140,230);rect(x,y,o2w,h);fill(165);rect(x+o2w,y,n2w,h);fill(120,200,130);rect(x+o2w+n2w,y,ow,h);fill(0);textSize(12);text('21% oxygen',x+8,y+22);text('78% nitrogen',x+o2w+8,y+22);text('còn lại: CO₂, hơi nước, khí khác',x,y+h+18);}
+function drawCandleDemo(x,y){
+  fill(255);stroke(190,215,225);rect(x,y,270,230,12);noStroke();fill(10,60,90);textSize(16);textStyle(BOLD);text('Ô phụ: oxygen và sự cháy',x+14,y+24);textStyle(NORMAL);textSize(12);fill(50);text('Nến trong ống úp: O₂ bị tiêu thụ, nến tắt, mực nước tăng. [T2/P50,I6/P50]',x+14,y+44,240);
+  // basin and tube
+  fill(120,190,230);rect(x+35,y+170,200,25,5);noFill();stroke(80);strokeWeight(2);rect(x+75,y+70,120,120,8);noStroke();fill(80,170,230,150);rect(x+77,y+190-70*candleWaterRise,116,70*candleWaterRise);
+  fill(120,80,30);rect(x+128,y+135,14,35);if(candleLit){fill(255,150,30);ellipse(x+135,y+128,18,28);fill(255,230,80);ellipse(x+135,y+128,9,16);} else {fill(80);text('tắt',x+125,y+125);} fill(20);text('O₂ trong ống: '+nf(candleO2Percent,1,1)+'%',x+42,y+210);fill(30,140,230);rect(x+42,y+215,(candleO2Percent/21)*170,8);fill(90);text('Oxygen duy trì sự sống và sự cháy [T4/P47]',x+14,y+64,240);
+}
+function drawPhotosynthesisDemo(x,y){
+  fill(255);stroke(190,215,225);rect(x,y,270,220,12);noStroke();fill(10,60,90);textSize(16);textStyle(BOLD);text('Ô phụ: rong giải phóng O₂',x+14,y+24);textStyle(NORMAL);textSize(12);fill(50);text('Hai cành rong đuôi chó đặt trong ống nghiệm đầy nước, úp ngược vào cốc A/B, không để bọt khí lọt vào. [T1/P110]',x+14,y+43,240);
+  drawTube(x+65,y+95,tubeAOxygen,'A'); drawTube(x+165,y+95,tubeBOxygen,'B'); fill(255,230,90,180);circle(x+230,y+88,38);fill(90);text('Ánh sáng: '+lightIntensity+'% [SSV]',x+150,y+195);
+}
+function drawTube(cx,cy,oxy,label){stroke(70);strokeWeight(2);fill(220,245,255);rect(cx-20,cy-10,40,100,18);fill(120,200,235);rect(cx-18,cy+10,36,78,12);noStroke();fill(30,150,70);for(let i=0;i<4;i++){line(cx,cy+75,cx-12+i*8,cy+35+i*6);}fill(30,140,230);ellipse(cx,cy+5,30,oxy*38);fill(20);text('Cốc '+label,cx-18,cy+115);text('bọt O₂',cx-19,cy-16);}
+function drawFactPanel(x,y){
+  fill(255);stroke(190,215,225);rect(x,y,320,485,12);noStroke();fill(10,60,90);textSize(16);textStyle(BOLD);text('Bảng dữ kiện RAG được mã hóa',x+14,y+24);textStyle(NORMAL);textSize(12);fill(30);
+  let lines=[
+    '[T2/P50] Không khí: 21% O₂, 78% N₂, còn lại CO₂, hơi nước, khí khác.',
+    '[T4/P47] O₂ duy trì sự sống và sự cháy; hỗ trợ đốt củi, than đá, dầu mỏ, khí thiên nhiên.',
+    '[T3/P105] Đốt butane tỏa nhiệt, tạo CO₂ và H₂O.',
+    '[T3/P105] PTHH: '+RAG_FACTS.butaneEq+'.',
+    '[T3/P105] Dùng khoảng 5 mL nước vôi trong để quan sát CO₂ sau khi đốt.',
+    '[T1/P110] Thí nghiệm quang hợp: 2 cành rong đuôi chó, 2 ống nghiệm, cốc A/B, úp ngược không có bọt khí ban đầu.',
+    '[T1/P110] Thí nghiệm tinh bột: giấy đen; cồn 90°; nước ấm; iodine trong đĩa Petri.',
+    '[T5/P111] HS điền hiện tượng/kết quả cho 2 thí nghiệm quang hợp.'
+  ];
+  let yy=y+48; for(let s of lines){text('• '+s,x+16,yy,288);yy+=52;}
+  fill(255,248,210);stroke(220,190,90);rect(x+14,y+410,292,58,8);noStroke();fill(80,55,0);text('[SSV] Độ tan O₂ trong nước không có trong RAG; mô phỏng dùng 9,1 mg/L ở 20°C và 21% O₂, nước 1,0 L.',x+24,y+430,270);
+}
+function drawSourceTrace(x,y){fill(10,60,90);textSize(14);textStyle(BOLD);text('Source trace',x,y);textStyle(NORMAL);textSize(11);fill(40);text('[TEXT] science_db_7.pdf p110 | [TEXT] science_db_6.pdf p50 | [IMAGE] science_db_6.pdf p50 | [TEXT] science_db_6.pdf p47 | [TEXT] science_db_9.pdf p105 | [TABLE] science_db_7.pdf p111',x,y+18,315);}
+</script>
+</body>
+</html>

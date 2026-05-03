@@ -13,9 +13,6 @@ build/
 .pytest-tmp/
 tmp_pytest/
 .mypy_cache/
-generated_labs/
-generated_experiment/
-generated/
 
 # OS
 .DS_Store
