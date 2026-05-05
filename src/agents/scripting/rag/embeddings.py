@@ -41,16 +41,36 @@ class TextEmbedder:
     DIMENSION = 1536
     MODEL = "text-embedding-3-small"
 
-    def __init__(self, model: str = MODEL) -> None:
-        try:
-            from langchain_openai import OpenAIEmbeddings
-        except ImportError as exc:
-            raise ImportError(
-                "langchain-openai is required: pip install langchain-openai"
-            ) from exc
+    def __init__(self, model: Optional[str] = None) -> None:
+        import os
+        backend = os.getenv("PROVIDER_BACKEND", "openai").lower()
+        
+        if backend == "nvidia":
+            try:
+                from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
+            except ImportError as exc:
+                raise ImportError(
+                    "langchain-nvidia-ai-endpoints is required: pip install langchain-nvidia-ai-endpoints"
+                ) from exc
+            
+            resolved_model = model or os.getenv("EMBEDDING_MODEL") or "nvidia/llama-3.2-nv-embedqa-1b-v2"
+            self._client = NVIDIAEmbeddings(
+                model=resolved_model,
+                nvidia_api_key=os.getenv("NVIDIA_API_KEY"),
+                base_url=os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+            )
+            logger.debug("TextEmbedder initialised with NVIDIA model=%s", resolved_model)
+        else:
+            try:
+                from langchain_openai import OpenAIEmbeddings
+            except ImportError as exc:
+                raise ImportError(
+                    "langchain-openai is required: pip install langchain-openai"
+                ) from exc
 
-        self._client = OpenAIEmbeddings(model=model)
-        logger.debug("TextEmbedder initialised with model=%s", model)
+            resolved_model = model or self.MODEL
+            self._client = OpenAIEmbeddings(model=resolved_model)
+            logger.debug("TextEmbedder initialised with OpenAI model=%s", resolved_model)
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of strings. Returns one vector per text."""
