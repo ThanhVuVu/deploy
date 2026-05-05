@@ -19,7 +19,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
-from src.agents.scripting.rag import MultimodalRetriever, ScriptingScienceRetriever
+from src.agents.scripting.rag import MultimodalIndexer, MultimodalRetriever, ScriptingScienceRetriever
 from src.agents.scripting.scripting_agent import ScriptingAgent
 from src.agents.simulator import SimulatorAgent, SimulatorArtifacts, SimulatorOutputError
 from src.pipeline.experiment_pipeline import ExperimentGenerationPipeline
@@ -388,6 +388,27 @@ with st.sidebar:
     st.markdown("### Điều kiện chạy")
     st.caption("Cần `.env` có khóa cho scripting agent và simulator model.")
     st.caption("RAG index cần được ingest trước bằng `python -m src.agents.scripting.ingest_cli --all`.")
+
+    st.markdown("---")
+    st.markdown("### Quản lý chỉ mục RAG")
+    try:
+        # Check if index exists or is empty
+        indexer = MultimodalIndexer()
+        counts = indexer.collection_counts()
+        total_chunks = sum(counts.values())
+        st.write(f"Tổng số chunks hiện có: **{total_chunks}**")
+        
+        if total_chunks == 0:
+            st.warning("⚠️ Chỉ mục RAG đang trống (thường do deploy lần đầu).")
+        
+        if st.button("🚀 Ingest dữ liệu JSON (science_db/)", use_container_width=True):
+            with st.spinner("Đang ingest dữ liệu JSON... Quá trình này gọi OpenAI embedding nên có thể mất vài phút."):
+                from src.agents.scripting.ingest_cli import cmd_ingest_all_json
+                cmd_ingest_all_json(indexer, APP_ROOT / "science_db")
+                st.success("Đã ingest xong! Vui lòng tải lại trang.")
+                st.rerun()
+    except Exception as e:
+        st.error(f"Không thể khởi tạo Indexer: {e}")
 
 
 st.markdown(
