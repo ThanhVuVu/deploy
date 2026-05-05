@@ -121,7 +121,7 @@ class OpenAIClient:
         self,
         provider: LLMProvider,
         *,
-        max_retries: int = 3,
+        max_retries: int = 5,
         retry_delay: float = 2.0,
     ) -> None:
         self.provider = provider
@@ -276,14 +276,24 @@ class OpenAIClient:
             except APIStatusError as exc:
                 if self._try_repair_bad_request(exc, kwargs):
                     continue
-                # 429 rate-limit → also retry; other 4xx/5xx → re-raise immediately
-                if exc.status_code == 429 and attempt < self.max_retries:
+                # Retry on rate-limit (429) or transient server errors (500, 502, 503, 504)
+                retryable_status_codes = {429, 500, 502, 503, 504}
+                if exc.status_code in retryable_status_codes and attempt < self.max_retries:
                     last_exc = exc
-                    retry_after = float(
-                        exc.response.headers.get("retry-after", delay)
-                    )
+                    # Use Retry-After header if present, otherwise use exponential back-off
+                    retry_after = delay
+                    header_retry_after = exc.response.headers.get("retry-after")
+                    if header_retry_after:
+                        try:
+                            retry_after = float(header_retry_after)
+                        except ValueError:
+                            pass
+                    
                     logger.warning(
-                        "Rate-limited (429); retrying in %.1fs …", retry_after
+                        "API error %d; retrying in %.1fs … (%s)",
+                        exc.status_code,
+                        retry_after,
+                        exc.message
                     )
                     time.sleep(retry_after)
                     delay *= 2

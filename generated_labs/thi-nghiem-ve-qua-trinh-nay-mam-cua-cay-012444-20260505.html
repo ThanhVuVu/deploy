@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang='vi'>
+<head>
+    <meta charset='UTF-8'>
+    <title>Mô phỏng Quá trình Nảy mầm của Hạt</title>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js'></script>
+    <style>
+        body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f0f0; font-family: sans-serif; }
+        canvas { border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        .controls { position: absolute; left: 20px; top: 20px; background: rgba(255,255,255,0.9); padding: 20px; border-radius: 10px; width: 280px; }
+        .control-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; color: #333; }
+        input { width: 100%; }
+        .status { margin-top: 10px; font-style: italic; color: #555; }
+    </style>
+</head>
+<body>
+    <div class='controls'>
+        <h3>Điều kiện Nảy mầm</h3>
+        <div class='control-group'>
+            <label id='label-water'>Nước: 0%</label>
+            <input type='range' id='slider-water' min='0' max='100' value='0'>
+        </div>
+        <div class='control-group'>
+            <label id='label-oxygen'>Oxygen: 0%</label>
+            <input type='range' id='slider-oxygen' min='0' max='100' value='0'>
+        </div>
+        <div class='control-group'>
+            <label id='label-temp'>Nhiệt độ: 20°C</label>
+            <input type='range' id='slider-temp' min='0' max='50' value='20'>
+        </div>
+        <button onclick='resetSim()'>Đặt lại thí nghiệm</button>
+        <div id='status-box' class='status'>Trạng thái: Hạt đang ngủ</div>
+    </div>
+    <script>
+        let waterS, oxygenS, tempS;
+        let growthProgress = 0;
+        let seedSize = 40;
+        let rootLen = 0;
+        let shootLen = 0;
+        let leafSize = 0;
+        let stage = 0; // 0: Dormant, 1: Imbibition, 2: Root, 3: Shoot, 4: Leaves
+
+        function setup() {
+            createCanvas(800, 600);
+            waterS = select('#slider-water');
+            oxygenS = select('#slider-oxygen');
+            tempS = select('#slider-temp');
+        }
+
+        function draw() {
+            background(220, 240, 255);
+            
+            // UI Updates
+            let w = parseInt(waterS.value());
+            let o = parseInt(oxygenS.value());
+            let t = parseInt(tempS.value());
+            select('#label-water').html(`Nước: ${w}%`);
+            select('#label-oxygen').html(`Oxygen: ${o}%`);
+            select('#label-temp').html(`Nhiệt độ: ${t}°C`);
+
+            // Soil
+            fill(139, 69, 19);
+            noStroke();
+            rect(0, 300, width, 300);
+
+            // Logic: Growth Calculation
+            // [Standard Simulation Values]: Optimal Temp 20-30C
+            let tempFactor = (t >= 15 && t <= 35) ? 1 : (t > 35 || t < 15) ? 0.1 : 0;
+            let growthRate = (w / 100) * (o / 100) * tempFactor * 0.1;
+
+            if (w > 20) {
+                seedSize = lerp(seedSize, 50, 0.01); // Imbibition swelling
+            }
+
+            if (w > 50 && o > 50 && tempFactor > 0) {
+                growthProgress += growthRate;
+                select('#status-box').html('Trạng thái: Đang nảy mầm...');
+            } else {
+                select('#status-box').html('Trạng thái: Thiếu điều kiện cần thiết');
+            }
+
+            // Stage Transitions
+            if (growthProgress > 1) stage = 1; // Root starts
+            if (growthProgress > 5) stage = 2; // Shoot starts
+            if (growthProgress > 10) stage = 3; // Leaves start
+
+            // Visuals
+            push();
+            translate(width / 2, 320);
+            
+            // Root
+            if (stage >= 1) {
+                stroke(240, 230, 200);
+                strokeWeight(4);
+                rootLen = lerp(rootLen, (growthProgress - 1) * 10, 0.1);
+                line(0, 0, 0, rootLen);
+            }
+
+            // Seed
+            fill(180, 140, 80);
+            stroke(100, 70, 30);
+            strokeWeight(2);
+            ellipse(0, 0, seedSize, seedSize * 0.8);
+
+            // Shoot
+            if (stage >= 2) {
+                stroke(100, 200, 100);
+                strokeWeight(5);
+                shootLen = lerp(shootLen, (growthProgress - 5) * 10, 0.1);
+                line(0, 0, 0, -shootLen);
+                
+                // Leaves
+                if (stage >= 3) {
+                    fill(50, 200, 50);
+                    leafSize = lerp(leafSize, (growthProgress - 10) * 5, 0.1);
+                    ellipse(-leafSize, -shootLen, leafSize * 2, leafSize);
+                    ellipse(leafSize, -shootLen, leafSize * 2, leafSize);
+                }
+            }
+            pop();
+
+            // Ground line
+            stroke(100, 50, 0);
+            line(0, 300, width, 300);
+        }
+
+        function resetSim() {
+            growthProgress = 0;
+            seedSize = 40;
+            rootLen = 0;
+            shootLen = 0;
+            leafSize = 0;
+            stage = 0;
+            waterS.value(0);
+            oxygenS.value(0);
+            tempS.value(20);
+        }
+    </script>
+</body>
+</html>

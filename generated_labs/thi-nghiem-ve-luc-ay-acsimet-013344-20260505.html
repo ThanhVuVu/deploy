@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Thí nghiệm lực đẩy (Thrust) - Virtual Lab</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <style>
+    body { margin:0; overflow:hidden; font-family:Arial, sans-serif; background:#e0f7ff; }
+    #hud {
+      position:absolute; top:10px; left:10px; background:rgba(255,255,255,0.8); padding:10px; border-radius:5px;
+    }
+    #controls {
+      position:absolute; top:10px; right:10px; background:rgba(255,255,255,0.8); padding:10px; border-radius:5px;
+    }
+    .label { margin-bottom:5px; display:block; }
+    input[type=range] { width:200px; }
+    button { margin-top:5px; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div id="thrustDisplay" class="label">Lực đẩy: 20 N</div>
+    <div id="accDisplay" class="label">Gia tốc: 0.10 m/s²</div>
+    <div id="velDisplay" class="label">Vận tốc: 0.00 m/s</div>
+    <div id="heightDisplay" class="label">Chiều cao: 0.00 m</div>
+  </div>
+  <div id="controls">
+    <label class="label" for="thrustSlider">Điều chỉnh lực đẩy (N):</label>
+    <input type="range" id="thrustSlider" min="0" max="50" step="0.5" value="20" />
+    <button id="resetBtn">Đặt lại</button>
+  </div>
+
+  <script>
+    // ==================== Grounding Map ====================
+    // All scientific constants below are derived from [Standard Simulation Values]
+    // because no RAG context was provided.
+    // ------------------------------------------------------
+    const PIXELS_PER_METER = 50; // [Standard Simulation Values] conversion factor
+    const MASS = 2.0; // kg, [Standard Simulation Values]
+    const GRAVITY = 9.8; // m/s², [Standard Simulation Values]
+    const TIME_STEP = 0.02; // s per simulation update, [Standard Simulation Values]
+    const GROUND_Y = 350; // pixel position of ground line
+    // ------------------------------------------------------
+
+    let thrust = 20.0; // N, initial value, adjustable via UI
+    let rocket = {
+      x: 200,
+      y: GROUND_Y, // start on ground
+      width: 30,
+      height: 60,
+      velocityY: 0, // pixel/s
+      accelerationY: 0 // pixel/s²
+    };
+
+    function setup() {
+      createCanvas(400, 400);
+      // UI bindings
+      const slider = select('#thrustSlider');
+      slider.input(() => {
+        thrust = parseFloat(slider.value());
+        select('#thrustDisplay').html(`Lực đẩy: ${thrust.toFixed(1)} N`);
+      });
+      select('#resetBtn').mousePressed(resetSimulation);
+    }
+
+    function draw() {
+      background('#e0f7ff');
+      drawGround();
+      updatePhysics();
+      drawRocket();
+      updateHUD();
+    }
+
+    function drawGround() {
+      stroke(0);
+      fill('#8B4513');
+      rect(0, GROUND_Y, width, height - GROUND_Y);
+    }
+
+    function updatePhysics() {
+      // Convert thrust to acceleration (m/s²)
+      const a_physical = (thrust - MASS * GRAVITY) / MASS; // m/s²
+      // Convert to pixel units
+      rocket.accelerationY = a_physical * PIXELS_PER_METER; // pixel/s²
+      // Update velocity and position using Euler integration
+      rocket.velocityY += rocket.accelerationY * TIME_STEP; // pixel/s
+      rocket.y -= rocket.velocityY * TIME_STEP; // subtract because y increases downward
+      // Collision with ground
+      if (rocket.y + rocket.height >= GROUND_Y) {
+        rocket.y = GROUND_Y - rocket.height;
+        rocket.velocityY = 0;
+        rocket.accelerationY = 0;
+      }
+    }
+
+    function drawRocket() {
+      fill('#ff4444');
+      rect(rocket.x, rocket.y, rocket.width, rocket.height);
+    }
+
+    function updateHUD() {
+      const a_physical = (thrust - MASS * GRAVITY) / MASS; // m/s² (recomputed for display)
+      const vel_m_s = (rocket.velocityY / PIXELS_PER_METER) * -1; // convert to m/s, sign reversed
+      const height_m = ((GROUND_Y - rocket.height) - rocket.y) / PIXELS_PER_METER; // meters above ground
+      select('#accDisplay').html(`Gia tốc: ${a_physical.toFixed(2)} m/s²`);
+      select('#velDisplay').html(`Vận tốc: ${vel_m_s.toFixed(2)} m/s`);
+      select('#heightDisplay').html(`Chiều cao: ${height_m.toFixed(2)} m`);
+    }
+
+    function resetSimulation() {
+      rocket.y = GROUND_Y - rocket.height;
+      rocket.velocityY = 0;
+      rocket.accelerationY = 0;
+      thrust = 20.0;
+      select('#thrustSlider').value(thrust);
+      select('#thrustDisplay').html(`Lực đẩy: ${thrust.toFixed(1)} N`);
+    }
+  </script>
+</body>
+</html>

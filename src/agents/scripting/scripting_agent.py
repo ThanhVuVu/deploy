@@ -100,7 +100,7 @@ class ScriptingAgent(BaseAgent):
                 model=resolved_model,
                 temperature=float(os.getenv("SCRIPTING_TEMPERATURE", "0.2")),
                 max_tokens=int(os.getenv("SCRIPTING_MAX_TOKENS", "4096")),
-                timeout=float(os.getenv("SCRIPTING_TIMEOUT", "120")),
+                timeout=float(os.getenv("SCRIPTING_TIMEOUT", "300")),
             )
             llm = ChatOpenAI(
                 model=provider.model,

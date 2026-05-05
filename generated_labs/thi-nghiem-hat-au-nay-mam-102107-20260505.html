@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang='vi'>
+<head>
+    <meta charset='UTF-8'>
+    <title>Thí Nghiệm Hạt Đậu Nảy Mầm</title>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js'></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; overflow: hidden; }
+        #ui-panel { position: absolute; top: 20px; left: 20px; width: 300px; background: rgba(255, 255, 255, 0.9); padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 10; }
+        .control-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; color: #333; font-size: 14px; }
+        input[type='range'] { width: 100%; }
+        button { width: 100%; padding: 10px; margin-top: 10px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; font-weight: bold; transition: 0.3s; }
+        button:hover { background: #45a049; }
+        .info-box { font-size: 12px; color: #666; margin-top: 10px; font-style: italic; border-left: 3px solid #4CAF50; padding-left: 8px; }
+        #grounding-map { position: absolute; bottom: 10px; right: 10px; font-size: 10px; color: #999; text-align: right; }
+    </style>
+</head>
+<body>
+    <div id='ui-panel'>
+        <h2 style='margin-top:0; color: #2e7d32;'>🌱 Nảy Mầm Hạt Đậu</h2>
+        
+        <div class='control-group'>
+            <label>Nhiệt độ: <span id='temp-val'>25</span>°C</label>
+            <input type='range' id='temp-slider' min='0' max='60' value='25'>
+            <div class='info-box'>Tối ưu: 30°C - 35°C [Text 1]</div>
+        </div>
+
+        <div class='control-group'>
+            <label>Độ ẩm/Nước: <span id='water-val'>0</span>%</label>
+            <input type='range' id='water-slider' min='0' max='100' value='0'>
+            <div class='info-box'>Cần ngâm nước để kích hoạt [Text 1, 4]</div>
+        </div>
+
+        <div class='control-group'>
+            <label>Chuẩn bị hạt:</label>
+            <button id='btn-filter'>Lọc hạt lép/vỡ [Text 1]</button>
+            <button id='btn-reset'>Làm mới thí nghiệm</button>
+        </div>
+
+        <div id='status-display' style='margin-top: 20px; font-weight: bold; color: #d32f2f;'>Trạng thái: Đang chờ...</div>
+    </div>
+    <div id='grounding-map'>Nguồn: lop_7_experiments.json (Text 1, 2, 4)</div>
+
+    <script>
+        let seeds = [];
+        let day = 0;
+        let timer = 0;
+        let isFiltered = false;
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            initSeeds();
+            
+            document.getElementById('btn-filter').onclick = () => {
+                isFiltered = true;
+                seeds = seeds.filter(s => !s.isBroken);
+                document.getElementById('btn-filter').disabled = true;
+                document.getElementById('btn-filter').innerText = "Đã lọc hạt lép";
+            };
+            
+            document.getElementById('btn-reset').onclick = () => {
+                isFiltered = false;
+                document.getElementById('btn-filter').disabled = false;
+                document.getElementById('btn-filter').innerText = "Lọc hạt lép/vỡ [Text 1]";
+                initSeeds();
+                day = 0;
+            };
+        }
+
+        function initSeeds() {
+            seeds = [];
+            for (let i = 0; i < 8; i++) {
+                seeds.push(new BeanSeed(random(width * 0.4, width * 0.8), random(height * 0.4, height * 0.7)));
+            }
+        }
+
+        function draw() {
+            background(220, 235, 255);
+            
+            // UI Updates
+            let temp = parseInt(document.getElementById('temp-slider').value);
+            let water = parseInt(document.getElementById('water-slider').value);
+            document.getElementById('temp-val').innerText = temp;
+            document.getElementById('water-val').innerText = water;
+
+            // Draw Petri Dish
+            fill(255, 255, 255, 150);
+            stroke(200);
+            strokeWeight(5);
+            ellipse(width / 2, height / 2, 500, 500);
+            
+            // Water layer in dish
+            if (water > 0) {
+                fill(100, 150, 255, water * 1.5);
+                noStroke();
+                ellipse(width / 2, height / 2, 490, 490);
+            }
+
+            // Simulation Logic
+            timer++;
+            if (timer % 60 == 0) day++;
+
+            let statusText = "Đang chờ...";
+            if (water < 30) statusText = "Thiếu nước để nảy mầm";
+            else if (temp < 30) statusText = "Nhiệt độ quá thấp";
+            else if (temp > 40) statusText = "Nhiệt độ quá cao";
+            else statusText = "Điều kiện lý tưởng! 🌱";
+            document.getElementById('status-display').innerText = "Trạng thái: " + statusText;
+
+            // Update and Draw Seeds
+            seeds.forEach(seed => {
+                seed.update(temp, water);
+                seed.display();
+            });
+
+            // HUD
+            fill(0);
+            noStroke();
+            textSize(20);
+            textAlign(CENTER);
+            text("Ngày thứ: " + floor(day/60), width / 2, height - 50);
+        }
+
+        class BeanSeed {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.isBroken = random() < 0.3; // 30% chance of being a 'hạt lép'
+                this.growth = 0;
+                this.state = 'dormant';
+                this.rootLen = 0;
+                this.stemLen = 0;
+                this.color = this.isBroken ? color(200, 180, 150) : color(150, 120, 80);
+            }
+
+            update(temp, water) {
+                if (this.isBroken) return; // Broken seeds don't grow [Text 1]
+
+                // Germination trigger [Text 1, 4]
+                if (this.state === 'dormant' && water >= 40 && temp >= 30 && temp <= 40) {
+                    this.state = 'germinating';
+                }
+
+                if (this.state === 'germinating') {
+                    // Growth rate based on temperature [Text 1]
+                    let rate = 0;
+                    if (temp >= 30 && temp <= 35) rate = 0.01; // Optimal
+                    else if (temp >= 20 && temp <= 45) rate = 0.003; // Sub-optimal
+                    
+                    this.growth += rate;
+                    this.rootLen += rate * 20;
+                    this.stemLen += rate * 15;
+
+                    if (this.growth >= 1) this.state = 'seedling';
+                }
+            }
+
+            display() {
+                push();
+                translate(this.x, this.y);
+                
+                // Draw Root
+                stroke(200, 200, 255);
+                strokeWeight(3);
+                line(0, 0, 0, this.rootLen);
+
+                // Draw Stem
+                stroke(100, 200, 100);
+                strokeWeight(4);
+                line(0, 0, 0, -this.stemLen);
+
+                // Draw Seed
+                fill(this.color);
+                noStroke();
+                ellipse(0, 0, 15, 20);
+
+                // Draw Leaves
+                if (this.stemLen > 10) {
+                    fill(50, 200, 50);
+                    ellipse(-5, -this.stemLen, 10, 5);
+                    ellipse(5, -this.stemLen, 10, 5);
+                }
+                
+                if (this.isBroken && this.growth === 0) {
+                    fill(0);
+                    textSize(10);
+                    text("Hạt lép", 0, 20);
+                }
+                pop();
+            }
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+    </script>
+</body>
+</html>

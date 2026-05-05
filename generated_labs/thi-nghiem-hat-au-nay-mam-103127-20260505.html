@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang='vi'>
+<head>
+    <meta charset='UTF-8'>
+    <title>Mô phỏng Nảy mầm Hạt Đậu</title>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js'></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; font-family: sans-serif; background: #f0f0f0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+<script>
+/**
+ * GROUNDING MAP:
+ * - Water/Cotton: [Text 1, 4, 5]
+ * - Temp 30-35C: [Text 1]
+ * - Temp 35-40C: [Text 4]
+ * - Sequence: Dry -> Soaked -> Root -> Stem: [Text 4, 5]
+ * - Direction: Root down, Stem up: [Text 4, 5]
+ * - Light: [Text 2, 4]
+ */
+
+let tempSlider, waterBtn, resetBtn;
+let seed;
+let env = { temp: 25, moisture: false, light: true };
+let growthProgress = 0;
+
+const STATE = {
+    DRY: 'Hạt khô',
+    SOAKED: 'Đang ngậm nước',
+    GERMINATING: 'Đang nảy mầm',
+    SEEDLING: 'Cây con'
+};
+
+class BeanSeed {
+    constructor() {
+        this.reset();
+    }
+
+    reset() {
+        this.state = STATE.DRY;
+        this.w = 30;
+        this.h = 40;
+        this.rootLen = 0;
+        this.stemLen = 0;
+        this.leafSize = 0;
+        this.color = color(220, 190, 150);
+        this.progress = 0;
+    }
+
+    update() {
+        // Logic nảy mầm: Cần nước và nhiệt độ 30-40°C
+        const isOptimalTemp = env.temp >= 30 && env.temp <= 40;
+        const isTooCold = env.temp < 20;
+        const isTooHot = env.temp > 45;
+
+        if (isTooCold || isTooHot) return; // Ngừng phát triển
+
+        if (env.moisture) {
+            // Tốc độ tăng trưởng tỉ lệ thuận với khoảng 30-35°C [Text 1]
+            let rate = 0;
+            if (env.temp >= 30 && env.temp <= 35) rate = 0.1;
+            else if (isOptimalTemp) rate = 0.05;
+            else rate = 0.01;
+
+            if (this.state === STATE.DRY) {
+                this.state = STATE.SOAKED;
+            }
+
+            if (this.state === STATE.SOAKED) {
+                this.w += rate * 2;
+                this.h += rate * 2;
+                this.progress += rate;
+                if (this.progress >= 20) this.state = STATE.GERMINATING;
+            }
+
+            if (this.state === STATE.GERMINATING) {
+                this.rootLen += rate * 1.5;
+                this.progress += rate;
+                if (this.rootLen > 60) this.state = STATE.SEEDLING;
+            }
+
+            if (this.state === STATE.SEEDLING) {
+                this.stemLen += rate * 1.2;
+                this.leafSize += rate * 0.5;
+                this.color = lerpColor(color(220, 190, 150), color(100, 200, 50), this.stemLen/100);
+                this.progress += rate;
+            }
+        }
+        this.progress = constrain(this.progress, 0, 100);
+    }
+
+    draw(x, y) {
+        push();
+        translate(x, y);
+        
+        // Draw Root (Mọc xuống dưới [Text 5])
+        stroke(200, 200, 255);
+        strokeWeight(3);
+        noFill();
+        beginShape();
+        vertex(0, 0);
+        bezierVertex(5, this.rootLen/2, -5, this.rootLen/2, 0, this.rootLen);
+        endShape();
+
+        // Draw Stem (Mọc hướng lên [Text 4])
+        stroke(100, 200, 50);
+        strokeWeight(4);
+        line(0, 0, 0, -this.stemLen);
+
+        // Draw Leaves
+        if (this.leafSize > 2) {
+            fill(100, 200, 50);
+            noStroke();
+            ellipse(-this.leafSize, -this.stemLen, this.leafSize*2, this.leafSize);
+            ellipse(this.leafSize, -this.stemLen, this.leafSize*2, this.leafSize);
+        }
+
+        // Draw Seed Body
+        fill(this.color);
+        stroke(150, 120, 80);
+        strokeWeight(2);
+        ellipse(0, 0, this.w, this.h);
+        
+        pop();
+    }
+}
+
+function setup() {
+    createCanvas(800, 600);
+    seed = new BeanSeed();
+
+    // UI Controls
+    tempSlider = createSlider(0, 50, 25);
+    tempSlider.position(30, 120);
+    tempSlider.style('width', '150px');
+
+    waterBtn = createButton('Tưới nước / Ngâm nước');
+    waterBtn.position(30, 160);
+    waterBtn.mousePressed(() => { env.moisture = true; });
+
+    resetBtn = createButton('Reset Thí nghiệm');
+    resetBtn.position(30, 200);
+    resetBtn.mousePressed(() => {
+        seed.reset();
+        env.moisture = false;
+        env.temp = 25;
+        tempSlider.value(25);
+    });
+}
+
+function draw() {
+    background(240);
+    
+    // Update environment
+    env.temp = tempSlider.value();
+    seed.update();
+
+    // --- Left Panel: Controls & HUD ---
+    fill(255);
+    stroke(200);
+    rect(10, 10, 220, 580, 10);
+    
+    fill(0);
+    noStroke();
+    textSize(18);
+    textStyle(BOLD);
+    text('ĐIỀU KHIỂN', 30, 40);
+    
+    textStyle(NORMAL);
+    textSize(14);
+    text('Nhiệt độ (°C):', 30, 110);
+    text(env.temp + '°C', 180, 115);
+    
+    // HUD Data
+    fill(50);
+    text('THÔNG SỐ THỜI GIAN THỰC', 30, 250);
+    
+    fill(0);
+    text(`Trạng thái: ${seed.state}`, 30, 280);
+    text(`Độ ẩm: ${env.moisture ? 'Đủ' : 'Thiếu'}`, 30, 300);
+    
+    // Progress Bar
+    text('Tiến độ nảy mầm:', 30, 330);
+    fill(200);
+    rect(30, 340, 160, 20);
+    fill(100, 200, 100);
+    rect(30, 340, map(seed.progress, 0, 100, 0, 160), 20);
+    text(Math.floor(seed.progress) + '%', 195, 355);
+
+    // Scientific Guidance
+    fill(100);
+    textSize(12);
+    text('Gợi ý khoa học:', 30, 380);
+    text('• Ngâm nước để kích hoạt hạt [Text 1]', 30, 400);
+    text('• Nhiệt độ lý tưởng: 30-35°C [Text 1]', 30, 420);
+    text('• Nước ấm: 35-40°C [Text 4]', 30, 440);
+    text('• Rễ mọc xuống, mầm mọc lên [Text 5]', 30, 460);
+
+    // --- Right Panel: Simulation ---
+    // Draw Petri Dish
+    fill(220, 230, 255, 150);
+    stroke(180);
+    strokeWeight(5);
+    ellipse(500, 300, 400, 400);
+    
+    // Draw Cotton/Soil base
+    fill(env.moisture ? color(200, 220, 255) : color(240, 240, 230));
+    noStroke();
+    ellipse(500, 320, 350, 150);
+    
+    // Draw Seed
+    seed.draw(500, 310);
+    
+    // Light effect
+    if (env.light) {
+        fill(255, 255, 200, 50);
+        rect(300, 0, 400, 100);
+        fill(255, 255, 0, 100);
+        textSize(12);
+        text('Ánh sáng phòng thí nghiệm [Text 2]', 550, 30);
+    }
+}
+</script>
+</body>
+</html>

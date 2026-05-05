@@ -97,7 +97,7 @@ class MultimodalRetrievalResult:
                 f"[Image {idx}] source={chunk.source_file} | "
                 f"page={chunk.page_number} | image_index={chunk.image_index} | "
                 f"score={chunk.score:.3f}\n"
-                f"M\u00f4 t\u1ea3 h\u00ecnh \u1ea3nh: {chunk.caption or '(kh\u00f4ng c\u00f3 m\u00f4 t\u1ea3)'}"
+                f"Mô tả hình ảnh: {chunk.caption or '(không có mô tả)'}"
             )
             idx += 1
 

@@ -59,7 +59,7 @@ class IngestStats:
         if self.skipped:
             return f"[{self.pdf_name}] Already ingested — skipped."
         return (
-            f"[{self.pdf_name}] Added → "
+            f"[{self.pdf_name}] Added: "
             f"text={self.texts_added}, "
             f"image={self.images_added}, "
             f"table={self.tables_added}"
@@ -98,8 +98,8 @@ class MultimodalIndexer:
         persist_dir: str | Path = ".rag/multimodal_chroma",
         text_chunk_size: int = 700,
         text_chunk_overlap: int = 120,
-        openai_model: str = "gpt-4o",
-        embedding_model: str = "text-embedding-3-small",
+        llm_model: Optional[str] = None,
+        embedding_model: Optional[str] = None,
     ) -> None:
         # ── Validate + initialise lazy dependencies ────────────────────────
         try:
@@ -114,10 +114,28 @@ class MultimodalIndexer:
                 "langchain-text-splitters is required"
             ) from exc
 
+        from src.llm.provider import get_provider
+        from src.llm.openai_client import OpenAIClient
+
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
 
-        self.openai_model = openai_model
+        # Resolve model: priority parameter -> RAG_LLM_MODEL -> LLM_MODEL
+        self.llm_model = (
+            llm_model 
+            or os.getenv("RAG_LLM_MODEL") 
+            or os.getenv("LLM_MODEL") 
+            or "gpt-4o"
+        )
+        self._embedding_model = (
+            embedding_model 
+            or os.getenv("EMBEDDING_MODEL") 
+            or "text-embedding-3-small"
+        )
+
+        # Initialize OpenAIClient (supports NVIDIA/OpenAI via LLMProvider)
+        provider = get_provider(model=self.llm_model)
+        self._llm_client = OpenAIClient(provider)
 
         # Text splitter (shared for text and table summary chunks)
         self._splitter = RecursiveCharacterTextSplitter(
@@ -128,8 +146,6 @@ class MultimodalIndexer:
 
         # TextEmbedder — single embedder for ALL modalities (lazy)
         self._text_embedder = None
-        self._embedding_model = embedding_model
-        self._openai_client = None
 
         # ── ChromaDB client + 3 collections ──────────────────────────────
         # All three collections use the same embedding space (1536-dim OpenAI)
@@ -139,15 +155,15 @@ class MultimodalIndexer:
 
         self._col_text = self._chroma.get_or_create_collection(
             name=self.COLLECTION_TEXT,
-            metadata={"hnsw:space": "cosine", "embedding_model": embedding_model},
+            metadata={"hnsw:space": "cosine", "embedding_model": self._embedding_model},
         )
         self._col_image = self._chroma.get_or_create_collection(
             name=self.COLLECTION_IMAGE,
-            metadata={"hnsw:space": "cosine", "embedding_model": embedding_model},
+            metadata={"hnsw:space": "cosine", "embedding_model": self._embedding_model},
         )
         self._col_table = self._chroma.get_or_create_collection(
             name=self.COLLECTION_TABLE,
-            metadata={"hnsw:space": "cosine", "embedding_model": embedding_model},
+            metadata={"hnsw:space": "cosine", "embedding_model": self._embedding_model},
         )
 
         # ── Persistent manifest + caches ─────────────────────────────────
@@ -209,6 +225,43 @@ class MultimodalIndexer:
         logger.info("MultimodalIndexer: %s", stats)
         return stats
 
+    def ingest_json(self, json_path: Path) -> IngestStats:
+        """
+        Ingest a JSON file containing experiments.
+        Expected format: [{"id": "...", "experiment_content": "..."}, ...]
+        """
+        json_path = Path(json_path)
+        stats = IngestStats(pdf_name=json_path.name)
+
+        # ── Persistent-ingest guard ──────────────────────────────────────
+        json_hash = self._sha256_file(json_path)
+        if self._manifest.get(json_path.name) == json_hash:
+            logger.info("MultimodalIndexer: '%s' already ingested — skip.", json_path.name)
+            stats.skipped = True
+            return stats
+
+        logger.info("MultimodalIndexer: ingesting JSON '%s' …", json_path.name)
+
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            if not isinstance(data, list):
+                logger.error("MultimodalIndexer: JSON root must be a list.")
+                return stats
+
+            stats.texts_added = self._index_json_elements(data, json_path.name)
+            
+            # Record in manifest
+            self._manifest[json_path.name] = json_hash
+            self._save_json(self.persist_dir / self.MANIFEST_FILE, self._manifest)
+            
+            logger.info("MultimodalIndexer: %s", stats)
+            return stats
+        except Exception as e:
+            logger.error("MultimodalIndexer: failed to ingest JSON %s — %s", json_path.name, e)
+            return stats
+
     def collection_counts(self) -> dict[str, int]:
         """Return current document counts for all three collections."""
         return {
@@ -249,6 +302,34 @@ class MultimodalIndexer:
                     }
                 )
 
+        return self._upsert_text_records(records, self._col_text)
+
+    def _index_json_elements(self, items: list[dict], source_name: str) -> int:
+        """Chunk and embed JSON items into mm_text_chunks."""
+        records: list[dict] = []
+        for item in items:
+            exp_id = item.get("id", "unknown")
+            text = item.get("experiment_content", "")
+            if not text:
+                continue
+            
+            chunks = self._splitter.split_text(text)
+            for idx, chunk in enumerate(chunks):
+                content = chunk.strip()
+                if not content:
+                    continue
+                chunk_id = self._make_id(f"json|{source_name}|{exp_id}|{idx}|{content}")
+                records.append({
+                    "id": chunk_id,
+                    "content": content,
+                    "metadata": {
+                        "type": "text",
+                        "source_file": source_name,
+                        "page_number": 0,
+                        "section": exp_id,
+                        "chunk_id": chunk_id
+                    }
+                })
         return self._upsert_text_records(records, self._col_text)
 
     # ── Image / Scan-page indexing ───────────────────────────────────────────
@@ -360,8 +441,6 @@ class MultimodalIndexer:
         một trang scan thành {texts, tables, images}.
         """
         try:
-            from openai import OpenAI
-
             b64  = base64.b64encode(image_bytes).decode("ascii")
             mime = "image/png" if image_bytes[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
 
@@ -381,17 +460,13 @@ class MultimodalIndexer:
                 "CHỈ trả về JSON, không thêm bất kỳ text nào khác."
             )
 
-            if self._openai_client is None:
-                from openai import OpenAI
-                self._openai_client = OpenAI()
-
-            client = self._openai_client
-            
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    response = client.chat.completions.create(
-                        model=self.openai_model,
+                    # Use the raw openai client from our wrapper to handle complex multimodal payload
+                    # while benefiting from our provider configuration (base_url, api_key)
+                    response = self._llm_client._client.chat.completions.create(
+                        model=self.llm_model,
                         messages=[{
                             "role": "user",
                             "content": [
@@ -402,34 +477,23 @@ class MultimodalIndexer:
                                 }},
                             ],
                         }],
-                        response_format={"type": "json_object"},
+                        response_format={"type": "json_object"} if "gpt-4o" in self.llm_model else None,
                         max_tokens=3000,
-                        temperature=0.0 if attempt == 0 else 0.2, # slight variation on retry
+                        temperature=0.0 if attempt == 0 else 0.2,
                     )
                     
                     content = response.choices[0].message.content
                     if content is None:
-                        finish_reason = response.choices[0].finish_reason
-                        refusal = getattr(response.choices[0].message, "refusal", None)
-                        if refusal:
-                            logger.warning(
-                                "MultimodalIndexer: Vision analysis refused (p%s %s). Refusal: %s",
-                                page_number, pdf_name, refusal
-                            )
-                            # Do not skip: return a valid JSON with the refusal message
-                            return {
-                                "texts": [{"content": f"[CẢNH BÁO: OpenAI từ chối bóc tách hình ảnh này. Lý do: {refusal}]"}],
-                                "tables": [],
-                                "images": []
-                            }
-                            
-                        logger.warning(
-                            "MultimodalIndexer: Vision response content is None (p%s %s, attempt %d). Finish reason: %s",
-                            page_number, pdf_name, attempt + 1, finish_reason
-                        )
                         import time
                         time.sleep(2)
-                        continue # retry
+                        continue
+                        
+                    # Clean markdown code blocks if the model returned them
+                    content = content.strip()
+                    if content.startswith("```json"):
+                        content = content[7:-3].strip()
+                    elif content.startswith("```"):
+                        content = content[3:-3].strip()
                         
                     return json.loads(content)
                 except Exception as exc:
@@ -438,18 +502,15 @@ class MultimodalIndexer:
                         attempt + 1, page_number, pdf_name, exc
                     )
                     if attempt == max_retries - 1:
-                        logger.error("MultimodalIndexer: Vision analysis completely failed after %d retries.", max_retries)
-                        raise # Do not skip, bubble up the error
+                        raise
                     import time
                     time.sleep(2)
-                    
-            raise RuntimeError(f"Vision analysis failed for p{page_number} after {max_retries} retries due to None content.")
         except Exception as exc:
             logger.error(
                 "MultimodalIndexer: Fatal error in vision analysis (p%s %s) — %s",
                 page_number, pdf_name, exc,
             )
-            raise # Strict mode: do not skip any page
+            raise
 
     # ── Table indexing ────────────────────────────────────────────────────────
 
@@ -493,36 +554,14 @@ class MultimodalIndexer:
         return self._upsert_text_records(records, self._col_table)
 
     def _summarise_table(self, markdown: str) -> str:
-        """Call GPT-4o mini to summarise a Markdown table. Returns empty on failure."""
+        """Summarise a Markdown table using the configured LLM."""
         try:
-            from openai import OpenAI
-
-            if self._openai_client is None:
-                from openai import OpenAI
-                self._openai_client = OpenAI()
-
-            client = self._openai_client
-            response = client.chat.completions.create(
-                model=self.openai_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a science education assistant. "
-                            "Summarise the following Markdown table in 2–4 clear sentences "
-                            "that capture the key data, trends, and units. "
-                            "Write in Vietnamese if the table content is Vietnamese."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Table:\n{markdown}",
-                    },
-                ],
+            return self._llm_client.chat_simple(
+                user_message=f"Summarise this Markdown table in 2-4 clear sentences capturing key data, trends and units. Write in Vietnamese:\n\nTable:\n{markdown}",
+                system_prompt="You are a science education assistant.",
                 max_tokens=300,
-                temperature=0.0,
+                temperature=0.0
             )
-            return response.choices[0].message.content.strip()
         except Exception as exc:
             logger.error("MultimodalIndexer: table summarisation failed — %s", exc)
             return ""

@@ -147,7 +147,7 @@ def get_provider(
     base_url: Optional[str] = None,
     temperature: float = 0.2,
     max_tokens: int = 4096,
-    timeout: float = 120.0,
+    timeout: Optional[float] = None,
     **extra_kwargs,
 ) -> LLMProvider:
     """
@@ -227,6 +227,12 @@ def get_provider(
         or _DEFAULT_BASE_URLS[resolved_backend]
     )
 
+    # ---- resolve timeout ---------------------------------------------------
+    resolved_timeout = (
+        timeout 
+        or float(os.getenv("LLM_TIMEOUT", "600.0"))
+    )
+
     return LLMProvider(
         backend=resolved_backend,
         model=resolved_model,
@@ -234,6 +240,6 @@ def get_provider(
         base_url=resolved_url,
         temperature=temperature,
         max_tokens=max_tokens,
-        timeout=timeout,
+        timeout=resolved_timeout,
         extra_kwargs=extra_kwargs,
     )

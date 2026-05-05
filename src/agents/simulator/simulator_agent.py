@@ -481,7 +481,7 @@ class SimulatorAgent(BaseAgent):
                 model=resolved_model or None,
                 temperature=self._compatible_temperature(resolved_model, temperature),
                 max_tokens=resolved_max_tokens,
-                timeout=float(os.getenv("SIMULATOR_TIMEOUT", "300")),
+                timeout=float(os.getenv("SIMULATOR_TIMEOUT", "600")),
             )
             self.client = OpenAIClient(provider)
         except Exception as exc:

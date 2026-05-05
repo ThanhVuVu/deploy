@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang='vi'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Mô phỏng Đo Hiệu Điện Thế - Vật Lý 8</title>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js'></script>
+    <style>
+        body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; background-color: #2c3e50; font-family: sans-serif; overflow: hidden; }
+        canvas { border: 4px solid #34495e; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .controls { position: absolute; top: 20px; left: 20px; color: white; background: rgba(0,0,0,0.6); padding: 15px; border-radius: 10px; pointer-events: none; }
+        .controls b { color: #f1c40f; }
+    </style>
+</head>
+<body>
+    <div class='controls'>
+        <h3>Hướng dẫn thí nghiệm</h3>
+        <p>1. Chọn nguồn điện (Pin) phù hợp.</p>
+        <p>2. Nhấn vào <b>Công tắc</b> để đóng/ngắt mạch.</p>
+        <p>3. Quan sát <b>Vôn kế</b> mắc song song với bóng đèn.</p>
+        <p>4. Lưu ý quy tắc: Chốt (+) nối nơi dòng điện đi vào, chốt (-) nối nơi đi ra.</p>
+    </div>
+
+    <script>
+        // --- GROUNDING CONSTANTS ---
+        const SOURCE_OPTIONS = [1.5, 3.0, 4.5]; // [Text 1, Trang 0]
+        const BULB_RATED_V = 2.5; // [Text 1, Trang 0]
+        const SAFETY_LIMIT = 40.0; // [Text 5, Trang 0]
+        const HOUSEHOLD_V = 220.0; // [Text 5, Trang 0]
+        
+        // [Standard Simulation Values]
+        const R_BULB = 10; 
+        const R_RHEOSTAT = 5;
+
+        let currentSourceV = 1.5;
+        let isSwitchClosed = false;
+        let electrons = [];
+        let btn1, btn2, btn3;
+
+        function setup() {
+            createCanvas(800, 600);
+            
+            // Battery Selection Buttons
+            btn1 = createButton('Pin 1.5V');
+            btn1.position(20, 250);
+            btn1.mousePressed(() => currentSourceV = 1.5);
+            
+            btn2 = createButton('Pin 3.0V');
+            btn2.position(20, 280);
+            btn2.mousePressed(() => currentSourceV = 3.0);
+            
+            btn3 = createButton('Pin 4.5V');
+            btn3.position(20, 310);
+            btn3.mousePressed(() => currentSourceV = 4.5);
+
+            // Initialize electrons
+            for (let i = 0; i < 50; i++) {
+                electrons.push(new Electron());
+            }
+        }
+
+        function draw() {
+            background(45, 55, 72);
+            
+            // Calculate Physics
+            let totalR = R_BULB + R_RHEOSTAT;
+            let currentI = isSwitchClosed ? (currentSourceV / totalR) : 0;
+            let voltageBulb = isSwitchClosed ? (currentI * R_BULB) : 0;
+
+            drawCircuit(voltageBulb, currentI);
+            drawHUD(voltageBulb);
+        }
+
+        function drawCircuit(vBulb, iCurrent) {
+            stroke(200);
+            strokeWeight(4);
+            fill(0);
+
+            // Circuit Path (Rectangle)
+            // Battery (Left), Switch (Top), Bulb (Right), Rheostat (Bottom)
+            let x1 = 250, y1 = 150; // Top Left
+            let x2 = 550, y2 = 150; // Top Right
+            let x3 = 550, y3 = 450; // Bottom Right
+            let x4 = 250, y4 = 450; // Bottom Left
+
+            // Wires
+            line(x1, y1, x2, y1); // Top
+            line(x2, y1, x2, y2); // Right
+            line(x2, y2, x1, y2); // Bottom
+            line(x1, y2, x1, y1); // Left
+
+            // 1. Battery (Left side)
+            drawBattery(x1 - 20, (y1 + y2) / 2, currentSourceV);
+
+            // 2. Switch (Top side)
+            drawSwitch((x1 + x2) / 2, y1);
+
+            // 3. Bulb (Right side)
+            drawBulb(x2, (y1 + y2) / 2, vBulb);
+
+            // 4. Rheostat (Bottom side)
+            drawRheostat((x1 + x2) / 2, y2);
+
+            // 5. Voltmeter (Parallel to Bulb)
+            drawVoltmeter(x2 + 80, (y1 + y2) / 2, vBulb);
+
+            // Electron Animation
+            if (isSwitchClosed) {
+                electrons.forEach(e => {
+                    e.move(iCurrent);
+                    e.display();
+                });
+            }
+        }
+
+        function drawBattery(x, y, v) {
+            fill(30);
+            stroke(100);
+            rect(x - 20, y - 40, 40, 80, 5);
+            fill(255, 200, 0);
+            textAlign(CENTER, CENTER);
+            textSize(14);
+            text(v + 'V', x, y);
+            fill(255, 0, 0); text('+', x, y - 50); // Positive terminal
+            fill(0, 0, 255); text('-', x, y + 50); // Negative terminal
+        }
+
+        function drawSwitch(x, y) {
+            let isOpen = !isSwitchClosed;
+            stroke(100);
+            line(x - 30, y, x - 10, y);
+            line(x + 10, y, x + 30, y);
+            
+            if (isOpen) {
+                stroke(200);
+                line(x - 10, y, x + 10, y - 30);
+            } else {
+                stroke(200);
+                line(x - 10, y, x + 10, y);
+            }
+            
+            fill(255);
+            noStroke();
+            text('Công tắc', x, y + 30);
+        }
+
+        function drawBulb(x, y, v) {
+            stroke(100);
+            fill(200);
+            ellipse(x, y, 40, 40);
+            
+            // Glow effect
+            if (v > 0) {
+                let glow = map(v, 0, 4.5, 0, 100);
+                fill(255, 255, 0, glow);
+                ellipse(x, y, 40 + glow/2, 40 + glow/2);
+                
+                if (v > BULB_RATED_V * 1.5) {
+                    fill(255, 0, 0);
+                    text('QUÁ TẢI!', x, y - 40);
+                }
+            }
+            fill(0);
+            text('Bóng đèn 2.5V', x, y + 40);
+        }
+
+        function drawRheostat(x, y) {
+            stroke(100);
+            line(x - 40, y, x + 40, y);
+            fill(150);
+            rect(x - 10, y - 15, 20, 30);
+            fill(0);
+            text('Biến trở', x, y + 30);
+        }
+
+        function drawVoltmeter(x, y, v) {
+            // Parallel wires
+            stroke(150);
+            line(550, 220, x, y - 40);
+            line(550, 380, x, y + 40);
+
+            // Voltmeter Body
+            fill(220);
+            stroke(0);
+            rect(x - 40, y - 50, 80, 100, 10);
+            
+            // Digital Display
+            fill(50);
+            rect(x - 30, y - 20, 60, 40);
+            fill(0, 255, 0);
+            textSize(18);
+            textAlign(CENTER, CENTER);
+            text(v.toFixed(2) + ' V', x, y);
+            
+            fill(0);
+            textSize(12);
+            text('VÔN KẾ', x, y - 35);
+            
+            // Polarity labels
+            fill(255, 0, 0); text('+', x - 35, y - 45); // Inflow
+            fill(0, 0, 255); text('-', x - 35, y + 45); // Outflow
+        }
+
+        function drawHUD(vBulb) {
+            fill(0, 0, 0, 150);
+            rect(580, 20, 200, 180, 10);
+            fill(255);
+            textAlign(LEFT);
+            textSize(14);
+            
+            let xOff = 600;
+            text(`Nguồn điện: ${currentSourceV} V`, xOff, 40);
+            text(`Vôn kế đo: ${vBulb.toFixed(2)} V`, xOff, 60);
+            text(`Công tắc: ${isSwitchClosed ? 'Đóng' : 'Ngắt'}`, xOff, 80);
+            
+            stroke(255, 200, 0);
+            line(xOff, 95, 760, 95);
+            noStroke();
+            
+            fill(0, 255, 0);
+            text(`An toàn (< 40V)`, xOff, 115);
+            fill(255, 100, 100);
+            text(`Nguy hiểm (220V)`, xOff, 135);
+            
+            fill(200);
+            textSize(11);
+            text('Nguồn: [Text 1, 4, 5]', xOff, 160);
+        }
+
+        function mousePressed() {
+            // Check if click is on switch area
+            if (mouseX > 380 && mouseX < 420 && mouseY > 130 && mouseY < 170) {
+                isSwitchClosed = !isSwitchClosed;
+            }
+        }
+
+        class Electron {
+            constructor() {
+                this.reset();
+            }
+            reset() {
+                this.pos = 0; // 0 to 1 along the circuit path
+                this.speed = random(0.001, 0.003);
+            }
+            move(i) {
+                if (i > 0) {
+                    this.pos += this.speed * (i * 10);
+                    if (this.pos > 1) this.pos = 0;
+                } else {
+                    this.pos = 0;
+                }
+            }
+            display() {
+                let x, y;
+                let p = this.pos;
+                // Path: Battery -> Switch -> Bulb -> Rheostat -> Battery
+                if (p < 0.25) { // Battery to Switch
+                    x = lerp(250, 400, p * 4);
+                    y = lerp(300, 150, p * 4);
+                } else if (p < 0.5) { // Switch to Bulb
+                    x = lerp(400, 550, (p - 0.25) * 4);
+                    y = 150;
+                } else if (p < 0.75) { // Bulb to Rheostat
+                    x = 550;
+                    y = lerp(150, 450, (p - 0.5) * 4);
+                } else { // Rheostat to Battery
+                    x = lerp(550, 250, (p - 0.75) * 4);
+                    y = 450;
+                }
+                fill(255, 255, 0);
+                noStroke();
+                ellipse(x, y, 6, 6);
+            }
+        }
+    </script>
+</body>
+</html>
